@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Morti Pay</string>
+    <string name="title_activity_main">Morti Pay</string>
+    <string name="package_name">ph.mortipay.user</string>
+    <string name="custom_url_scheme">ph.mortipay.user</string>
+</resources>
