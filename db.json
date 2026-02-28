@@ -1,0 +1,61 @@
+{
+  "users": [
+    {
+      "id": "USR-000",
+      "fullName": "MotoPay Admin",
+      "email": "admin@motopay.ph",
+      "phone": "+63 900 000 0000",
+      "password": "admin123",
+      "role": "admin",
+      "createdAt": "2026-02-20T08:00:00.000Z"
+    },
+    {
+      "id": "USR-001",
+      "fullName": "Juan Dela Cruz",
+      "email": "juan@example.com",
+      "phone": "+63 912 345 6789",
+      "password": "juan1234",
+      "role": "user",
+      "createdAt": "2026-02-21T08:00:00.000Z",
+      "loanProfile": {
+        "motorcycle": "Yamaha Mio 125",
+        "principalAmount": 65000,
+        "downpayment": 15000,
+        "annualInterestRate": 12,
+        "termMonths": 24,
+        "monthlyInstallment": 3031.25,
+        "totalPayable": 72750,
+        "startDate": "2026-02-01T00:00:00.000Z",
+        "paidInstallmentNumbers": [
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "id": "USR-003",
+      "fullName": "Benedict Ivan Barron",
+      "email": "ivanbarron903@gmail.com",
+      "phone": "09456351695",
+      "password": "123",
+      "role": "user",
+      "createdAt": "2026-02-26T15:57:23.798Z",
+      "loanProfile": {
+        "motorcycle": "Kawasaki Ninja 400",
+        "principalAmount": 300000,
+        "downpayment": 15000,
+        "annualInterestRate": 10,
+        "termMonths": 36,
+        "monthlyInstallment": 10833.33,
+        "totalPayable": 390000,
+        "startDate": "2025-12-26T16:00:00.000Z",
+        "paidInstallmentNumbers": [
+          1,
+          2,
+          3
+        ]
+      }
+    }
+  ]
+}
