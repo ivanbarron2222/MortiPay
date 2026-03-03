@@ -4,6 +4,7 @@ import { Input } from "../ui/input";
 import { Search } from "lucide-react";
 import {
   createDemoUserWithLoan,
+  evaluateDemoUserLocationAlert,
   getDemoUsers,
   type DemoUserAccount,
 } from "../../lib/demo-users";
@@ -33,7 +34,7 @@ export function AdminUsers() {
       const next = await getDemoUsers();
       if (active) setUsers(next.filter((user) => user.role === "user"));
     };
-    load();
+    void load();
     return () => {
       active = false;
     };
@@ -91,6 +92,9 @@ export function AdminUsers() {
     const next = await getDemoUsers();
     setUsers(next.filter((user) => user.role === "user"));
   };
+
+  const getGoogleMapsUrl = (latitude: number, longitude: number) =>
+    `https://www.google.com/maps?q=${latitude},${longitude}`;
 
   return (
     <div className="p-8 space-y-6">
@@ -200,37 +204,82 @@ export function AdminUsers() {
           />
         </div>
         <div className="space-y-3">
-          {filteredUsers.map((user: DemoUserAccount) => (
-            <div key={user.id} className="rounded-lg border p-4">
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className="font-semibold text-gray-900">{user.fullName}</p>
-                  <p className="text-xs text-gray-600">
-                    {user.id} • {user.email} • {user.phone}
-                  </p>
+          {filteredUsers.map((user: DemoUserAccount) => {
+            const locationAlert = evaluateDemoUserLocationAlert(user);
+            const statusLabel =
+              locationAlert.status === "tracking"
+                ? "GPS TRACKING"
+                : locationAlert.status === "stale"
+                  ? "GPS STALE"
+                  : locationAlert.status === "location_off"
+                    ? "GPS OFF"
+                    : "GPS NO DATA";
+            const statusClass =
+              locationAlert.status === "tracking"
+                ? "bg-green-100 text-green-700"
+                : locationAlert.status === "no_data"
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-red-100 text-red-700";
+
+            return (
+              <div key={user.id} className="rounded-lg border p-4">
+                <div className="flex justify-between items-start gap-3">
+                  <div>
+                    <p className="font-semibold text-gray-900">{user.fullName}</p>
+                    <p className="text-xs text-gray-600">
+                      {user.id} - {user.email} - {user.phone}
+                    </p>
+                  </div>
+                  <span className={`text-xs font-semibold px-2 py-1 rounded ${statusClass}`}>
+                    {statusLabel}
+                  </span>
                 </div>
-                <span className="text-xs font-semibold px-2 py-1 rounded bg-green-100 text-green-700">
-                  ACTIVE
-                </span>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <p>Motorcycle: {user.loanProfile?.motorcycle ?? "-"}</p>
+                  <p>Term: {user.loanProfile?.termMonths ?? "-"} months</p>
+                  <p>
+                    Monthly:{" "}
+                    {user.loanProfile
+                      ? formatPhpCurrency(user.loanProfile.monthlyInstallment)
+                      : "-"}
+                  </p>
+                  <p>
+                    Total:{" "}
+                    {user.loanProfile
+                      ? formatPhpCurrency(user.loanProfile.totalPayable)
+                      : "-"}
+                  </p>
+                  <p className="col-span-2 text-xs text-gray-600">
+                    Last GPS heartbeat: {user.locationTracking?.lastHeartbeatAt ?? "none"}
+                  </p>
+                  <p className="col-span-2 text-xs text-gray-600">
+                    Latitude:{" "}
+                    {typeof user.locationTracking?.latitude === "number"
+                      ? user.locationTracking.latitude.toFixed(6)
+                      : "none"}{" "}
+                    | Longitude:{" "}
+                    {typeof user.locationTracking?.longitude === "number"
+                      ? user.locationTracking.longitude.toFixed(6)
+                      : "none"}
+                  </p>
+                  {typeof user.locationTracking?.latitude === "number" &&
+                  typeof user.locationTracking?.longitude === "number" ? (
+                    <a
+                      href={getGoogleMapsUrl(
+                        user.locationTracking.latitude,
+                        user.locationTracking.longitude,
+                      )}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="col-span-2 text-xs text-blue-700 underline"
+                    >
+                      Open in Google Maps
+                    </a>
+                  ) : null}
+                </div>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                <p>Motorcycle: {user.loanProfile?.motorcycle ?? "-"}</p>
-                <p>Term: {user.loanProfile?.termMonths ?? "-"} months</p>
-                <p>
-                  Monthly:{" "}
-                  {user.loanProfile
-                    ? formatPhpCurrency(user.loanProfile.monthlyInstallment)
-                    : "-"}
-                </p>
-                <p>
-                  Total:{" "}
-                  {user.loanProfile
-                    ? formatPhpCurrency(user.loanProfile.totalPayable)
-                    : "-"}
-                </p>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {filteredUsers.length === 0 ? (
             <p className="text-sm text-gray-600">No users found.</p>
           ) : null}

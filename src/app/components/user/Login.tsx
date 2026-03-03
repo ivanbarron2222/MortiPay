@@ -1,14 +1,21 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
-import { Eye, EyeOff } from "lucide-react";
+import { useNavigate, Link } from "react-router";
+import { Eye, EyeOff, Store } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { authenticateDemoUser, getDemoApiBaseUrl } from "../../lib/demo-users";
+import {
+  authenticateDemoUser,
+  getDemoApiBaseUrl,
+  logoutDemoUser,
+  updateCurrentDemoUserLocation,
+} from "../../lib/demo-users";
+import { ensureLocationAccess } from "../../lib/location-monitoring";
 
 export function Login() {
   const navigate = useNavigate();
   const userAppOnly = import.meta.env.VITE_USER_APP_ONLY === "true";
   const [showPassword, setShowPassword] = useState(false);
+  const [shopCode, setShopCode] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -19,10 +26,42 @@ export function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      const authenticated = await authenticateDemoUser(identifier, password);
+      const authenticated = await authenticateDemoUser(
+        identifier,
+        password,
+        shopCode,
+      );
       if (!authenticated) {
-        setError("Invalid credentials. Please check your email/phone and password.");
+        setError(
+          "Invalid credentials or shop code. Please check your details and try again.",
+        );
         return;
+      }
+
+      if (authenticated.role === "user") {
+        const locationCheck = await ensureLocationAccess();
+        if (!locationCheck.ok) {
+          await updateCurrentDemoUserLocation({
+            locationEnabled: false,
+            permissionState: locationCheck.off.permissionState,
+            lastError: locationCheck.off.reason,
+          });
+          logoutDemoUser();
+          setError(
+            "Location access is required. Please enable GPS permission and login again.",
+          );
+          return;
+        }
+
+        await updateCurrentDemoUserLocation({
+          lastHeartbeatAt: locationCheck.heartbeat.capturedAt,
+          latitude: locationCheck.heartbeat.latitude,
+          longitude: locationCheck.heartbeat.longitude,
+          accuracyMeters: locationCheck.heartbeat.accuracyMeters,
+          locationEnabled: true,
+          permissionState: locationCheck.heartbeat.permissionState,
+          lastError: null,
+        });
       }
 
       setError("");
@@ -30,9 +69,7 @@ export function Login() {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Unknown network error";
-      setError(
-        `Cannot connect to demo API (${apiBaseUrl}). ${message}`,
-      );
+      setError(`Cannot connect to demo API (${apiBaseUrl}). ${message}`);
     } finally {
       setLoading(false);
     }
@@ -62,6 +99,26 @@ export function Login() {
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Shop Code
+            </label>
+            <div className="relative">
+              <Store
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+              <Input
+                type="text"
+                value={shopCode}
+                onChange={(e) => setShopCode(e.target.value)}
+                placeholder="e.g. demo-shop"
+                className="w-full rounded-xl pl-9"
+                required
+              />
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Email / Phone Number
@@ -117,14 +174,26 @@ export function Login() {
         </form>
 
         <div className="mt-6 text-center">
-          <p className="text-gray-600">
-            Accounts are created by admin. Contact support for access.
+          <p className="text-gray-600 text-sm">
+            Own a motorcycle shop?{" "}
+            <Link
+              to="/register-shop"
+              className="text-blue-600 hover:text-blue-700 font-medium"
+            >
+              Register your shop →
+            </Link>
           </p>
         </div>
 
-        <div className="mt-6 p-4 bg-blue-50 rounded-xl">
+        <div className="mt-4 p-4 bg-blue-50 rounded-xl">
+          <p className="text-xs text-blue-800 text-center font-medium mb-1">
+            Demo Shops
+          </p>
           <p className="text-xs text-blue-800 text-center">
-            Demo: admin@motopay.ph / admin123 or juan@example.com / juan1234
+            <strong>demo-shop</strong> → admin@motopay.ph / admin123
+          </p>
+          <p className="text-xs text-blue-800 text-center">
+            <strong>wheeltek-sample</strong> → owner@wheeltek-sample.ph / wheeltek123
           </p>
           <p className="text-[10px] text-blue-700 text-center mt-1">
             API: {apiBaseUrl}

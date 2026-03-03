@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router";
 import { Login } from "./components/user/Login";
+import { RegisterShop } from "./components/user/RegisterShop";
 import { UserLayout } from "./components/user/UserLayout";
 import { Home } from "./components/user/Home";
 import { Reminders } from "./components/user/Reminders";
@@ -21,6 +22,10 @@ const routes = [
   {
     path: "/",
     Component: Login,
+  },
+  {
+    path: "/register-shop",
+    Component: RegisterShop,
   },
   {
     path: "/user",

@@ -17,7 +17,7 @@ export function Register() {
     confirmPassword: "",
   });
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (formData.password !== formData.confirmPassword) {
@@ -29,7 +29,7 @@ export function Register() {
       return;
     }
 
-    const { error: registerError } = registerDemoUser({
+    const { error: registerError } = await registerDemoUser({
       fullName: formData.fullName,
       email: formData.email,
       phone: formData.phone,
