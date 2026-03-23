@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "../ui/card";
 import { Input } from "../ui/input";
-import { Search, FileText } from "lucide-react";
+import { Search, FileText, Lock } from "lucide-react";
 import {
   type DemoUserAccount,
   getDemoUsers,
@@ -10,19 +10,25 @@ import {
   setDemoUserLoanStartDate,
 } from "../../lib/demo-users";
 import { formatPhpCurrency } from "../../lib/financing";
+import { getCurrentTenantSummary, type TenantSummary } from "../../lib/platform";
 
 export function AdminLoans() {
   const [searchTerm, setSearchTerm] = useState("");
   const [usersWithLoans, setUsersWithLoans] = useState<DemoUserAccount[]>([]);
+  const [tenant, setTenant] = useState<TenantSummary | null>(null);
 
   useEffect(() => {
     let active = true;
     const load = async () => {
-      const users = await getDemoUsers();
+      const [users, nextTenant] = await Promise.all([
+        getDemoUsers(),
+        getCurrentTenantSummary(),
+      ]);
       if (active) {
         setUsersWithLoans(
-          users.filter((user) => user.role === "user" && user.loanProfile),
+          users.filter((user) => user.role === "tenant_user" && user.loanProfile),
         );
+        setTenant(nextTenant);
       }
     };
     load();
@@ -37,6 +43,7 @@ export function AdminLoans() {
       user.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       user.loanProfile?.motorcycle.toLowerCase().includes(searchTerm.toLowerCase()),
   );
+  const isPremium = tenant?.plan === "premium";
 
   const handleInstallmentStatusChange = async (
     userId: string,
@@ -45,7 +52,9 @@ export function AdminLoans() {
   ) => {
     await setDemoUserInstallmentPaid(userId, installmentNumber, paid);
     const users = await getDemoUsers();
-    setUsersWithLoans(users.filter((user) => user.role === "user" && user.loanProfile));
+    setUsersWithLoans(
+      users.filter((user) => user.role === "tenant_user" && user.loanProfile),
+    );
   };
 
   const handleSetAlertScenario = async (
@@ -62,7 +71,9 @@ export function AdminLoans() {
     startDate.setMonth(startDate.getMonth() - paidInstallmentCount);
     await setDemoUserLoanStartDate(userId, startDate.toISOString());
     const users = await getDemoUsers();
-    setUsersWithLoans(users.filter((user) => user.role === "user" && user.loanProfile));
+    setUsersWithLoans(
+      users.filter((user) => user.role === "tenant_user" && user.loanProfile),
+    );
   };
 
   return (
@@ -136,61 +147,72 @@ export function AdminLoans() {
                 <p className="text-sm font-semibold text-gray-900 mb-2">
                   Installment Status
                 </p>
-                <div className="mb-3 rounded-md border bg-blue-50 p-2">
-                  <p className="text-xs text-blue-800 mb-2 font-semibold">
-                    Quick Reminder Scenario
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() =>
-                        handleSetAlertScenario(
-                          user.id,
-                          user.loanProfile?.paidInstallmentNumbers.length ?? 0,
-                          7,
-                        )
-                      }
-                      className="px-2 py-1 rounded bg-white border text-xs hover:bg-blue-100"
-                    >
-                      Due in 7 days
-                    </button>
-                    <button
-                      onClick={() =>
-                        handleSetAlertScenario(
-                          user.id,
-                          user.loanProfile?.paidInstallmentNumbers.length ?? 0,
-                          3,
-                        )
-                      }
-                      className="px-2 py-1 rounded bg-white border text-xs hover:bg-blue-100"
-                    >
-                      Due in 3 days
-                    </button>
-                    <button
-                      onClick={() =>
-                        handleSetAlertScenario(
-                          user.id,
-                          user.loanProfile?.paidInstallmentNumbers.length ?? 0,
-                          0,
-                        )
-                      }
-                      className="px-2 py-1 rounded bg-white border text-xs hover:bg-blue-100"
-                    >
-                      Due today
-                    </button>
-                    <button
-                      onClick={() =>
-                        handleSetAlertScenario(
-                          user.id,
-                          user.loanProfile?.paidInstallmentNumbers.length ?? 0,
-                          -1,
-                        )
-                      }
-                      className="px-2 py-1 rounded bg-white border text-xs hover:bg-blue-100"
-                    >
-                      Overdue by 1 day
-                    </button>
+                {isPremium ? (
+                  <div className="mb-3 rounded-md border bg-blue-50 p-2">
+                    <p className="text-xs text-blue-800 mb-2 font-semibold">
+                      Quick Reminder Scenario
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() =>
+                          handleSetAlertScenario(
+                            user.id,
+                            user.loanProfile?.paidInstallmentNumbers.length ?? 0,
+                            7,
+                          )
+                        }
+                        className="px-2 py-1 rounded bg-white border text-xs hover:bg-blue-100"
+                      >
+                        Due in 7 days
+                      </button>
+                      <button
+                        onClick={() =>
+                          handleSetAlertScenario(
+                            user.id,
+                            user.loanProfile?.paidInstallmentNumbers.length ?? 0,
+                            3,
+                          )
+                        }
+                        className="px-2 py-1 rounded bg-white border text-xs hover:bg-blue-100"
+                      >
+                        Due in 3 days
+                      </button>
+                      <button
+                        onClick={() =>
+                          handleSetAlertScenario(
+                            user.id,
+                            user.loanProfile?.paidInstallmentNumbers.length ?? 0,
+                            0,
+                          )
+                        }
+                        className="px-2 py-1 rounded bg-white border text-xs hover:bg-blue-100"
+                      >
+                        Due today
+                      </button>
+                      <button
+                        onClick={() =>
+                          handleSetAlertScenario(
+                            user.id,
+                            user.loanProfile?.paidInstallmentNumbers.length ?? 0,
+                            -1,
+                          )
+                        }
+                        className="px-2 py-1 rounded bg-white border text-xs hover:bg-blue-100"
+                      >
+                        Overdue by 1 day
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="mb-3 rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-600">
+                    <div className="flex items-center gap-2 font-semibold text-slate-700">
+                      <Lock size={12} />
+                      Premium Only
+                    </div>
+                    Quick reminder scenarios and overdue simulation controls are available only
+                    for premium tenants.
+                  </div>
+                )}
                 <div className="space-y-2 max-h-64 overflow-auto pr-1">
                   {schedule.map((item) => (
                     <div

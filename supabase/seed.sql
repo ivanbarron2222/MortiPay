@@ -1,9 +1,42 @@
 -- ============================================================
--- Tenant: demo-shop (platform demo)
+-- Platform super admin
 -- ============================================================
-insert into public.tenants (slug, name, owner_email)
-values ('demo-shop', 'Demo Shop', 'admin@motopay.ph')
-on conflict (slug) do update set owner_email = excluded.owner_email;
+insert into public.platform_admins (id, full_name, email, password)
+values ('SA-001', 'Platform Super Admin', 'superadmin@mortipay.ph', 'super123')
+on conflict (id) do update
+set
+  full_name = excluded.full_name,
+  email = excluded.email,
+  password = excluded.password;
+
+-- ============================================================
+-- Tenant: demo-shop (free plan)
+-- ============================================================
+insert into public.tenants (
+  slug,
+  name,
+  owner_email,
+  status,
+  plan,
+  requested_plan,
+  premium_requested_at
+)
+values (
+  'demo-shop',
+  'Demo Shop',
+  'admin@motopay.ph',
+  'active',
+  'free',
+  'premium',
+  now()
+)
+on conflict (slug) do update
+set
+  owner_email = excluded.owner_email,
+  status = excluded.status,
+  plan = excluded.plan,
+  requested_plan = excluded.requested_plan,
+  premium_requested_at = excluded.premium_requested_at;
 
 with tenant as (
   select id
@@ -35,21 +68,21 @@ from tenant
 cross join (
   values
     (
-      'ADM-001',
-      'System Admin',
+      'TA-001',
+      'Demo Shop Owner',
       'admin@motopay.ph',
       '+63 900 000 0000',
       'admin123',
-      'admin',
+      'tenant_admin',
       null::jsonb
     ),
     (
-      'USR-001',
+      'TU-001',
       'Juan Dela Cruz',
       'juan@example.com',
       '+63 912 345 6789',
       'juan1234',
-      'user',
+      'tenant_user',
       jsonb_build_object(
         'motorcycle', 'Yamaha Mio 125',
         'principalAmount', 65000,
@@ -63,14 +96,72 @@ cross join (
       )
     )
 ) as seeded(id, full_name, email, phone, password, role, loan_profile)
-on conflict (tenant_id, id) do nothing;
+on conflict (tenant_id, email) do update
+set
+  id = excluded.id,
+  full_name = excluded.full_name,
+  phone = excluded.phone,
+  password = excluded.password,
+  role = excluded.role,
+  loan_profile = excluded.loan_profile;
+
+with tenant as (
+  select id
+  from public.tenants
+  where slug = 'demo-shop'
+)
+insert into public.plan_requests (
+  tenant_id,
+  requested_by_user_id,
+  requested_by_email,
+  requested_plan,
+  status,
+  message
+)
+select
+  tenant.id,
+  'TA-001',
+  'admin@motopay.ph',
+  'premium',
+  'pending',
+  'Requesting premium access for advanced monitoring features.'
+from tenant
+on conflict do nothing;
 
 -- ============================================================
--- Tenant: wheeltek-sample (second demo shop — shows multi-tenancy)
+-- Tenant: wheeltek-sample (premium plan)
 -- ============================================================
-insert into public.tenants (slug, name, owner_email)
-values ('wheeltek-sample', 'Wheeltek Sample', 'owner@wheeltek-sample.ph')
-on conflict (slug) do update set owner_email = excluded.owner_email;
+insert into public.tenants (
+  slug,
+  name,
+  owner_email,
+  status,
+  plan,
+  requested_plan,
+  premium_requested_at,
+  premium_reviewed_at,
+  premium_reviewed_by
+)
+values (
+  'wheeltek-sample',
+  'Wheeltek Sample',
+  'owner@wheeltek-sample.ph',
+  'active',
+  'premium',
+  null,
+  null,
+  now(),
+  'superadmin@mortipay.ph'
+)
+on conflict (slug) do update
+set
+  owner_email = excluded.owner_email,
+  status = excluded.status,
+  plan = excluded.plan,
+  requested_plan = excluded.requested_plan,
+  premium_requested_at = excluded.premium_requested_at,
+  premium_reviewed_at = excluded.premium_reviewed_at,
+  premium_reviewed_by = excluded.premium_reviewed_by;
 
 with tenant as (
   select id
@@ -102,21 +193,21 @@ from tenant
 cross join (
   values
     (
-      'ADM-001',
+      'TA-001',
       'Wheeltek Owner',
       'owner@wheeltek-sample.ph',
       '+63 917 000 1111',
       'wheeltek123',
-      'admin',
+      'tenant_admin',
       null::jsonb
     ),
     (
-      'USR-001',
+      'TU-001',
       'Maria Santos',
       'maria@example.com',
       '+63 915 111 2222',
       'maria1234',
-      'user',
+      'tenant_user',
       jsonb_build_object(
         'motorcycle', 'Honda Beat 110',
         'principalAmount', 72000,
@@ -130,4 +221,11 @@ cross join (
       )
     )
 ) as seeded(id, full_name, email, phone, password, role, loan_profile)
-on conflict (tenant_id, id) do nothing;
+on conflict (tenant_id, email) do update
+set
+  id = excluded.id,
+  full_name = excluded.full_name,
+  phone = excluded.phone,
+  password = excluded.password,
+  role = excluded.role,
+  loan_profile = excluded.loan_profile;

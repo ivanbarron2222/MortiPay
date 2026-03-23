@@ -15,7 +15,7 @@ export function UserLayout() {
 
     const startMonitoring = async () => {
       const currentUser = await getCurrentDemoUser();
-      if (!active || !currentUser || currentUser.role !== "user") return;
+      if (!active || !currentUser || currentUser.role !== "tenant_user") return;
 
       stopMonitor = startLocationHeartbeat({
         intervalMs: 60000,

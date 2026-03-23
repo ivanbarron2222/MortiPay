@@ -1,26 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "../ui/card";
 import { Input } from "../ui/input";
-import { Search } from "lucide-react";
+import { Search, Link2, Lock } from "lucide-react";
 import {
   createDemoUserWithLoan,
   evaluateDemoUserLocationAlert,
   getDemoUsers,
+  getTenantUserInvites,
   type DemoUserAccount,
+  type TenantUserInvite,
 } from "../../lib/demo-users";
 import { formatPhpCurrency } from "../../lib/financing";
+import { isSupabaseEnabled } from "../../lib/supabase";
+import { getCurrentTenantSummary, type TenantSummary } from "../../lib/platform";
 
 type TermMonths = 12 | 24 | 36 | 48;
 
 export function AdminUsers() {
   const [searchTerm, setSearchTerm] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [users, setUsers] = useState<DemoUserAccount[]>([]);
+  const [invites, setInvites] = useState<TenantUserInvite[]>([]);
+  const [tenant, setTenant] = useState<TenantSummary | null>(null);
   const [form, setForm] = useState({
     fullName: "",
     email: "",
     phone: "",
-    password: "",
     motorcycle: "",
     principalAmount: "65000",
     downpayment: "15000",
@@ -31,8 +37,15 @@ export function AdminUsers() {
   useEffect(() => {
     let active = true;
     const load = async () => {
-      const next = await getDemoUsers();
-      if (active) setUsers(next.filter((user) => user.role === "user"));
+      const [nextUsers, nextInvites, nextTenant] = await Promise.all([
+        getDemoUsers(),
+        getTenantUserInvites(),
+        getCurrentTenantSummary(),
+      ]);
+      if (!active) return;
+      setUsers(nextUsers.filter((user) => user.role === "tenant_user"));
+      setInvites(nextInvites);
+      setTenant(nextTenant);
     };
     void load();
     return () => {
@@ -58,13 +71,16 @@ export function AdminUsers() {
     return { monthly, totalPayable };
   }, [form.annualInterestRate, form.principalAmount, form.termMonths]);
 
+  const pendingInvites = invites.filter((invite) => invite.status === "pending");
+  const isPremium = tenant?.plan === "premium";
+
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
     const created = await createDemoUserWithLoan({
       fullName: form.fullName,
       email: form.email,
       phone: form.phone,
-      password: form.password,
+      password: "invite-flow",
       motorcycle: form.motorcycle,
       principalAmount: Number(form.principalAmount),
       downpayment: Number(form.downpayment),
@@ -73,40 +89,63 @@ export function AdminUsers() {
     });
 
     if (created.error) {
+      setSuccess("");
       setError(created.error);
       return;
     }
 
     setError("");
+    setSuccess(
+      isSupabaseEnabled()
+        ? "Invite created. Share the activation link below with the tenant user."
+        : "User account created.",
+    );
     setForm({
       fullName: "",
       email: "",
       phone: "",
-      password: "",
       motorcycle: "",
       principalAmount: "65000",
       downpayment: "15000",
       annualInterestRate: "12",
       termMonths: "24",
     });
-    const next = await getDemoUsers();
-    setUsers(next.filter((user) => user.role === "user"));
+
+    const [nextUsers, nextInvites] = await Promise.all([
+      getDemoUsers(),
+      getTenantUserInvites(),
+    ]);
+    setUsers(nextUsers.filter((user) => user.role === "tenant_user"));
+    setInvites(nextInvites);
   };
 
   const getGoogleMapsUrl = (latitude: number, longitude: number) =>
     `https://www.google.com/maps?q=${latitude},${longitude}`;
+
+  const getInviteUrl = (token: string) =>
+    `${window.location.origin}/accept-invite/${token}`;
 
   return (
     <div className="p-8 space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900 mb-2">User Accounts</h1>
         <p className="text-gray-600">
-          Create user credentials and loan profile. Installments are auto-calculated.
+          {isSupabaseEnabled()
+            ? "Invite tenant users, then let them activate their own account securely."
+            : "Create user credentials and loan profile. Installments are auto-calculated."}
         </p>
       </div>
 
       <Card className="p-6 rounded-xl">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">Create User Loan Account</h2>
+        <h2 className="text-lg font-bold text-gray-900 mb-4">
+          {isSupabaseEnabled() ? "Create Tenant User Invite" : "Create User Loan Account"}
+        </h2>
+        {isSupabaseEnabled() ? (
+          <p className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+            The tenant user will receive an invite link, set their own password, and then get a
+            real authenticated account tied to this tenant.
+          </p>
+        ) : null}
         <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input
             placeholder="Full Name"
@@ -125,12 +164,6 @@ export function AdminUsers() {
             placeholder="Phone"
             value={form.phone}
             onChange={(event) => setForm({ ...form, phone: event.target.value })}
-            required
-          />
-          <Input
-            placeholder="Password"
-            value={form.password}
-            onChange={(event) => setForm({ ...form, password: event.target.value })}
             required
           />
           <Input
@@ -183,11 +216,50 @@ export function AdminUsers() {
             <span className="font-semibold">{formatPhpCurrency(preview.totalPayable)}</span>
           </div>
           <button className="md:col-span-2 h-10 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700">
-            Create Account
+            {isSupabaseEnabled() ? "Create Invite" : "Create Account"}
           </button>
           {error ? <p className="md:col-span-2 text-sm text-red-600">{error}</p> : null}
+          {success ? <p className="md:col-span-2 text-sm text-green-600">{success}</p> : null}
         </form>
       </Card>
+
+      {isSupabaseEnabled() ? (
+        <Card className="p-6 rounded-xl">
+          <h2 className="text-lg font-bold text-gray-900 mb-4">Pending Invites</h2>
+          <div className="space-y-3">
+            {pendingInvites.map((invite) => (
+              <div key={invite.id} className="rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-gray-900">{invite.fullName}</p>
+                    <p className="text-xs text-gray-600">
+                      {invite.email} - {invite.phone}
+                    </p>
+                  </div>
+                  <span className="rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
+                    PENDING
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-gray-700">
+                  {invite.motorcycle} - {invite.termMonths} months
+                </p>
+                <div className="mt-3 rounded-lg bg-gray-50 p-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-gray-700">
+                    <Link2 size={14} />
+                    Activation Link
+                  </div>
+                  <p className="mt-2 break-all text-xs text-blue-700">
+                    {getInviteUrl(invite.token)}
+                  </p>
+                </div>
+              </div>
+            ))}
+            {pendingInvites.length === 0 ? (
+              <p className="text-sm text-gray-600">No pending invites.</p>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="p-6 rounded-xl">
         <div className="relative mb-4">
@@ -204,22 +276,24 @@ export function AdminUsers() {
           />
         </div>
         <div className="space-y-3">
-          {filteredUsers.map((user: DemoUserAccount) => {
+          {filteredUsers.map((user) => {
             const locationAlert = evaluateDemoUserLocationAlert(user);
-            const statusLabel =
-              locationAlert.status === "tracking"
+            const statusLabel = isPremium
+              ? locationAlert.status === "tracking"
                 ? "GPS TRACKING"
                 : locationAlert.status === "stale"
                   ? "GPS STALE"
                   : locationAlert.status === "location_off"
                     ? "GPS OFF"
-                    : "GPS NO DATA";
-            const statusClass =
-              locationAlert.status === "tracking"
+                    : "GPS NO DATA"
+              : "PREMIUM ONLY";
+            const statusClass = isPremium
+              ? locationAlert.status === "tracking"
                 ? "bg-green-100 text-green-700"
                 : locationAlert.status === "no_data"
                   ? "bg-amber-100 text-amber-700"
-                  : "bg-red-100 text-red-700";
+                  : "bg-red-100 text-red-700"
+              : "bg-slate-100 text-slate-700";
 
             return (
               <div key={user.id} className="rounded-lg border p-4">
@@ -235,6 +309,7 @@ export function AdminUsers() {
                   </span>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <p>Loan No.: {user.loanProfile?.loanAccountNumber ?? "-"}</p>
                   <p>Motorcycle: {user.loanProfile?.motorcycle ?? "-"}</p>
                   <p>Term: {user.loanProfile?.termMonths ?? "-"} months</p>
                   <p>
@@ -249,33 +324,46 @@ export function AdminUsers() {
                       ? formatPhpCurrency(user.loanProfile.totalPayable)
                       : "-"}
                   </p>
-                  <p className="col-span-2 text-xs text-gray-600">
-                    Last GPS heartbeat: {user.locationTracking?.lastHeartbeatAt ?? "none"}
-                  </p>
-                  <p className="col-span-2 text-xs text-gray-600">
-                    Latitude:{" "}
-                    {typeof user.locationTracking?.latitude === "number"
-                      ? user.locationTracking.latitude.toFixed(6)
-                      : "none"}{" "}
-                    | Longitude:{" "}
-                    {typeof user.locationTracking?.longitude === "number"
-                      ? user.locationTracking.longitude.toFixed(6)
-                      : "none"}
-                  </p>
-                  {typeof user.locationTracking?.latitude === "number" &&
-                  typeof user.locationTracking?.longitude === "number" ? (
-                    <a
-                      href={getGoogleMapsUrl(
-                        user.locationTracking.latitude,
-                        user.locationTracking.longitude,
-                      )}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="col-span-2 text-xs text-blue-700 underline"
-                    >
-                      Open in Google Maps
-                    </a>
-                  ) : null}
+                  {isPremium ? (
+                    <>
+                      <p className="col-span-2 text-xs text-gray-600">
+                        Last GPS heartbeat: {user.locationTracking?.lastHeartbeatAt ?? "none"}
+                      </p>
+                      <p className="col-span-2 text-xs text-gray-600">
+                        Latitude:{" "}
+                        {typeof user.locationTracking?.latitude === "number"
+                          ? user.locationTracking.latitude.toFixed(6)
+                          : "none"}{" "}
+                        | Longitude:{" "}
+                        {typeof user.locationTracking?.longitude === "number"
+                          ? user.locationTracking.longitude.toFixed(6)
+                          : "none"}
+                      </p>
+                      {typeof user.locationTracking?.latitude === "number" &&
+                      typeof user.locationTracking?.longitude === "number" ? (
+                        <a
+                          href={getGoogleMapsUrl(
+                            user.locationTracking.latitude,
+                            user.locationTracking.longitude,
+                          )}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="col-span-2 text-xs text-blue-700 underline"
+                        >
+                          Open in Google Maps
+                        </a>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="col-span-2 rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                      <div className="flex items-center gap-2 font-semibold text-slate-700">
+                        <Lock size={12} />
+                        Premium Only
+                      </div>
+                      Advanced location heartbeat details and map links are available only on
+                      premium.
+                    </div>
+                  )}
                 </div>
               </div>
             );

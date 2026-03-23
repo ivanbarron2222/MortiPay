@@ -17,6 +17,22 @@ export default defineConfig({
     },
   },
 
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("react-router")) return "router";
+          if (id.includes("@supabase")) return "supabase";
+          if (id.includes("recharts")) return "charts";
+          if (id.includes("@mui")) return "mui";
+          if (id.includes("lucide-react")) return "icons";
+          return "vendor";
+        },
+      },
+    },
+  },
+
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 })

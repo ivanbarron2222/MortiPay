@@ -10,6 +10,7 @@ import {
   updateCurrentDemoUserLocation,
 } from "../../lib/demo-users";
 import { ensureLocationAccess } from "../../lib/location-monitoring";
+import { isSupabaseEnabled } from "../../lib/supabase";
 
 export function Login() {
   const navigate = useNavigate();
@@ -21,6 +22,7 @@ export function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const apiBaseUrl = getDemoApiBaseUrl();
+  const supabaseEnabled = isSupabaseEnabled();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,12 +35,14 @@ export function Login() {
       );
       if (!authenticated) {
         setError(
-          "Invalid credentials or shop code. Please check your details and try again.",
+          supabaseEnabled
+            ? "Invalid email, password, or shop code. Please check your details and try again."
+            : "Invalid credentials or shop code. Please check your details and try again.",
         );
         return;
       }
 
-      if (authenticated.role === "user") {
+      if (authenticated.role === "tenant_user") {
         const locationCheck = await ensureLocationAccess();
         if (!locationCheck.ok) {
           await updateCurrentDemoUserLocation({
@@ -65,7 +69,14 @@ export function Login() {
       }
 
       setError("");
-      navigate(!userAppOnly && authenticated.role === "admin" ? "/admin" : "/user");
+      if (!userAppOnly && authenticated.role === "super_admin") {
+        navigate("/super-admin");
+        return;
+      }
+
+      navigate(
+        !userAppOnly && authenticated.role === "tenant_admin" ? "/admin" : "/user",
+      );
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Unknown network error";
@@ -112,22 +123,21 @@ export function Login() {
                 type="text"
                 value={shopCode}
                 onChange={(e) => setShopCode(e.target.value)}
-                placeholder="e.g. demo-shop"
+                placeholder="e.g. demo-shop (leave blank for super admin)"
                 className="w-full rounded-xl pl-9"
-                required
               />
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Email / Phone Number
+              {supabaseEnabled ? "Email Address" : "Email / Phone Number"}
             </label>
             <Input
-              type="text"
+              type={supabaseEnabled ? "email" : "text"}
               value={identifier}
               onChange={(event) => setIdentifier(event.target.value)}
-              placeholder="Enter email or phone"
+              placeholder={supabaseEnabled ? "Enter email" : "Enter email or phone"}
               className="w-full rounded-xl"
               required
             />
@@ -180,20 +190,34 @@ export function Login() {
               to="/register-shop"
               className="text-blue-600 hover:text-blue-700 font-medium"
             >
-              Register your shop →
+              Register your shop {"->"}
             </Link>
           </p>
+          {supabaseEnabled ? (
+            <p className="text-gray-600 text-sm mt-2">
+              Using an older seeded account?{" "}
+              <Link
+                to={`/activate-account?email=${encodeURIComponent(identifier)}&shop=${encodeURIComponent(shopCode)}`}
+                className="text-blue-600 hover:text-blue-700 font-medium"
+              >
+                Activate existing account
+              </Link>
+            </p>
+          ) : null}
         </div>
 
         <div className="mt-4 p-4 bg-blue-50 rounded-xl">
           <p className="text-xs text-blue-800 text-center font-medium mb-1">
-            Demo Shops
+            Demo Accounts
           </p>
           <p className="text-xs text-blue-800 text-center">
-            <strong>demo-shop</strong> → admin@motopay.ph / admin123
+            <strong>demo-shop</strong> {"->"} admin@motopay.ph / admin123
           </p>
           <p className="text-xs text-blue-800 text-center">
-            <strong>wheeltek-sample</strong> → owner@wheeltek-sample.ph / wheeltek123
+            <strong>wheeltek-sample</strong> {"->"} owner@wheeltek-sample.ph / wheeltek123
+          </p>
+          <p className="text-xs text-blue-800 text-center">
+            <strong>super admin</strong> {"->"} superadmin@mortipay.ph / super123
           </p>
           <p className="text-[10px] text-blue-700 text-center mt-1">
             API: {apiBaseUrl}

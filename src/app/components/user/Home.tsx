@@ -1,10 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { LogOut, ChevronRight, Bike } from "lucide-react";
+import {
+  LogOut,
+  ChevronRight,
+  Bike,
+  CalendarClock,
+  CircleAlert,
+  CircleCheckBig,
+  Wallet,
+  Clock3,
+} from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
+import { Progress } from "../ui/progress";
 import { formatPhpCurrency } from "../../lib/financing";
 import { getCurrentDemoUser, logoutDemoUser, type DemoUserAccount } from "../../lib/demo-users";
+import {
+  getNextUserInstallment,
+  getRecentUserPayments,
+  getUserLoanProgress,
+  getUserReminderTrigger,
+  getUserLoanStatus,
+} from "../../lib/user-loan";
 import {
   Dialog,
   DialogContent,
@@ -26,8 +43,8 @@ type HomeAlert = {
 export function Home() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<DemoUserAccount | null>(null);
-  const loan = currentUser?.loanProfile ?? null;
   const [showAlertModal, setShowAlertModal] = useState(false);
+  const loan = currentUser?.loanProfile ?? null;
 
   useEffect(() => {
     let active = true;
@@ -35,82 +52,40 @@ export function Home() {
       const user = await getCurrentDemoUser();
       if (active) setCurrentUser(user);
     };
-    load();
+    void load();
     return () => {
       active = false;
     };
   }, []);
 
-  const nextDueDate = useMemo(() => {
-    if (!loan) return "-";
-    const paidCount = loan.paidInstallmentNumbers.length;
-    const dueDate = new Date(loan.startDate);
-    dueDate.setMonth(dueDate.getMonth() + paidCount);
-    return dueDate.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  }, [loan]);
-
-  const monthlyPayment = loan?.monthlyInstallment ?? 0;
-  const paidCount = loan?.paidInstallmentNumbers.length ?? 0;
-  const remainingBalance = loan
-    ? Math.max(loan.totalPayable - paidCount * loan.monthlyInstallment, 0)
-    : 0;
+  const nextInstallment = useMemo(() => getNextUserInstallment(loan), [loan]);
+  const loanProgress = useMemo(() => getUserLoanProgress(loan), [loan]);
+  const loanStatus = useMemo(() => getUserLoanStatus(loan), [loan]);
+  const reminderTrigger = useMemo(() => getUserReminderTrigger(loan), [loan]);
+  const recentPayments = useMemo(() => getRecentUserPayments(loan, 2), [loan]);
 
   const alertData = useMemo<HomeAlert | null>(() => {
-    if (!loan) return null;
-    if (paidCount >= loan.termMonths) return null;
+    if (!loan || !nextInstallment || !reminderTrigger) return null;
 
-    const dueDate = new Date(loan.startDate);
-    dueDate.setHours(0, 0, 0, 0);
-    dueDate.setMonth(dueDate.getMonth() + paidCount);
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const dayMs = 24 * 60 * 60 * 1000;
-    const daysUntilDue = Math.round((dueDate.getTime() - today.getTime()) / dayMs);
-
-    if (daysUntilDue === 7) {
+    if (reminderTrigger.kind === "overdue") {
+      const penalty = nextInstallment.overdueDays * DAILY_OVERDUE_PENALTY;
       return {
-        key: `due-7-${paidCount}`,
-        title: "Payment Due in 7 Days",
-        message: "Your next installment is due in 7 days.",
-        tone: "info",
-      };
-    }
-    if (daysUntilDue === 3) {
-      return {
-        key: `due-3-${paidCount}`,
-        title: "Payment Due in 3 Days",
-        message: "Your next installment is due in 3 days.",
-        tone: "warning",
-      };
-    }
-    if (daysUntilDue === 0) {
-      return {
-        key: `due-today-${paidCount}`,
-        title: "Payment Due Today",
-        message: "Your installment is due today.",
-        tone: "warning",
-      };
-    }
-    if (daysUntilDue < 0) {
-      const overdueDays = Math.abs(daysUntilDue);
-      const penalty = overdueDays * DAILY_OVERDUE_PENALTY;
-      return {
-        key: `overdue-${overdueDays}-${paidCount}`,
-        title: "Installment Overdue",
-        message: `Overdue by ${overdueDays} day(s). Penalty: ${formatPhpCurrency(
+        key: `overdue-${nextInstallment.overdueDays}-${nextInstallment.installmentNumber}`,
+        title: reminderTrigger.title,
+        message: `Overdue by ${nextInstallment.overdueDays} day(s). Penalty: ${formatPhpCurrency(
           penalty,
         )} (${formatPhpCurrency(DAILY_OVERDUE_PENALTY)}/day).`,
         tone: "warning",
       };
     }
-    return null;
-  }, [loan, paidCount]);
+
+    return {
+      key: `${reminderTrigger.kind}-${nextInstallment.installmentNumber}-${nextInstallment.daysUntilDue}`,
+      title: reminderTrigger.title,
+      message: reminderTrigger.message,
+      tone: reminderTrigger.tone,
+    };
+  }, [loan, nextInstallment, reminderTrigger]);
 
   useEffect(() => {
     if (!alertData || !currentUser) return;
@@ -120,6 +95,34 @@ export function Home() {
     window.sessionStorage.setItem(storageKey, alertData.key);
     setShowAlertModal(true);
   }, [alertData, currentUser]);
+
+  const statusBadgeClassName =
+    loanStatus.tone === "danger"
+      ? "bg-red-100 text-red-700"
+      : loanStatus.tone === "warning"
+        ? "bg-amber-100 text-amber-700"
+        : loanStatus.tone === "success"
+          ? "bg-emerald-100 text-emerald-700"
+          : "bg-blue-100 text-blue-700";
+
+  const dueCardClassName =
+    loanStatus.tone === "danger"
+      ? "border-red-200 bg-red-500 text-white"
+      : loanStatus.tone === "warning"
+        ? "border-amber-300 bg-amber-500 text-slate-950"
+        : "border-blue-200 bg-blue-600 text-white";
+
+  const dueCardMutedClassName =
+    loanStatus.tone === "danger"
+      ? "text-red-100"
+      : loanStatus.tone === "warning"
+        ? "text-amber-950/80"
+        : "text-blue-100";
+
+  const dueCardButtonClassName =
+    loanStatus.tone === "warning"
+      ? "bg-slate-950 hover:bg-black text-white"
+      : "bg-white/15 hover:bg-white/20 text-white border border-white/20";
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-600 to-blue-700 pb-6">
@@ -157,14 +160,14 @@ export function Home() {
       </Dialog>
 
       <div className="bg-blue-600 px-6 pt-6 pb-8">
-        <div className="flex justify-between items-center mb-6">
+        <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-white">Morti Pay</h1>
           <button
             onClick={() => {
               logoutDemoUser();
               navigate("/");
             }}
-            className="text-white hover:text-blue-100 p-2"
+            className="p-2 text-white hover:text-blue-100"
           >
             <LogOut size={22} />
           </button>
@@ -178,75 +181,136 @@ export function Home() {
         </div>
       </div>
 
-      <div className="px-6 -mt-4">
-        <Card className="bg-white rounded-2xl p-6 shadow-lg">
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-sm text-gray-600">Your Motorcycle</p>
-                <h3 className="text-xl font-bold text-gray-900">
-                  {loan?.motorcycle ?? "No Loan Assigned Yet"}
-                </h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  {loan ? "Loan account is active" : "Admin will assign your loan details"}
-                </p>
-              </div>
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                <svg
-                  className="w-8 h-8 text-blue-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 10V3L4 14h7v7l9-11h-7z"
-                  />
-                </svg>
-              </div>
+      <div className="space-y-4 px-4 -mt-4 sm:px-6">
+        <Card className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Your Vehicle</p>
+              <h3 className="mt-2 text-xl font-bold leading-tight text-slate-950 sm:text-2xl">
+                {loan?.motorcycle ?? "No Loan Assigned Yet"}
+              </h3>
+              <p className="mt-1 break-all text-sm text-slate-500 sm:break-normal">
+                {currentUser?.id ?? "-"} • Loan {loan?.loanAccountNumber ?? "-"}
+              </p>
             </div>
+            <span
+              className={`inline-flex shrink-0 items-center rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClassName}`}
+            >
+              {loanStatus.label}
+            </span>
+          </div>
 
-            <div className="border-t border-gray-200 pt-4 space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Next Payment Due</span>
-                <span className="font-semibold text-blue-600">
-                  {loan ? nextDueDate : "-"}
-                </span>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Remaining Balance</span>
-                <span className="text-lg font-bold text-gray-900">
-                  {loan ? formatPhpCurrency(remainingBalance) : "-"}
-                </span>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Monthly Payment</span>
-                <span className="font-semibold text-gray-900">
-                  {loan ? formatPhpCurrency(monthlyPayment) : "-"}
-                </span>
-              </div>
+          <div className="mt-4 space-y-3">
+            <div className="rounded-2xl bg-slate-100 p-4">
+              <p className="text-sm text-slate-500">Remaining Balance</p>
+              <p className="mt-1 break-words text-2xl font-bold leading-tight text-slate-950 sm:text-3xl">
+                {loan ? formatPhpCurrency(loanProgress.remainingBalance) : "-"}
+              </p>
             </div>
+            <div className="rounded-2xl bg-slate-100 p-4">
+              <p className="text-sm text-slate-500">Monthly Payment</p>
+              <p className="mt-1 break-words text-2xl font-bold leading-tight text-slate-950 sm:text-3xl">
+                {loan ? formatPhpCurrency(loan.monthlyInstallment) : "-"}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between text-sm">
+              <span className="font-semibold text-slate-900">Installment Progress</span>
+              <span className="font-semibold text-blue-600">
+                {loanProgress.progressPercent.toFixed(0)}%
+              </span>
+            </div>
+            <Progress value={loanProgress.progressPercent} className="h-3 bg-slate-200" />
+            <div className="mt-2 flex items-center justify-between text-sm text-slate-600">
+              <span>{loanProgress.paidMonths} paid</span>
+              <span>{loanProgress.remainingMonths} remaining</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className={`rounded-3xl border p-4 shadow-sm sm:p-5 ${dueCardClassName}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em]">
+                {loanStatus.label === "Current" ? "Next Payment" : loanStatus.label}
+              </p>
+              <h3 className="mt-2 text-3xl font-bold">
+                {loan && nextInstallment ? formatPhpCurrency(nextInstallment.amount) : "-"}
+              </h3>
+              <p className={`mt-2 text-sm ${dueCardMutedClassName}`}>
+                {loan && nextInstallment
+                  ? `Due ${nextInstallment.dueDateLabel}`
+                  : "Admin will assign your first installment schedule."}
+              </p>
+              <p className={`mt-1 text-sm ${dueCardMutedClassName}`}>
+                {loan && nextInstallment
+                  ? nextInstallment.overdueDays > 0
+                    ? `${nextInstallment.overdueDays} day(s) overdue`
+                    : nextInstallment.daysUntilDue === 0
+                      ? "Due today"
+                      : `In ${nextInstallment.daysUntilDue} day(s)`
+                  : loanStatus.message}
+              </p>
+            </div>
+            <Clock3 className="h-6 w-6 shrink-0" />
           </div>
 
           <Button
             onClick={() => navigate("/user/loan-details")}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-6 rounded-xl text-lg"
+            className={`mt-5 w-full rounded-2xl py-6 text-base ${dueCardButtonClassName}`}
           >
             View Installment Breakdown
           </Button>
         </Card>
 
-        <div className="mt-6 space-y-3">
+        <Card className="rounded-3xl p-4 shadow-sm sm:p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-slate-500">Recent Payment Activity</p>
+              <h3 className="text-lg font-bold text-slate-900">Latest updates</h3>
+            </div>
+            <button
+              onClick={() => navigate("/user/loan-details")}
+              className="text-sm font-semibold text-blue-600 hover:text-blue-700"
+            >
+              View full history
+            </button>
+          </div>
+          <div className="mt-4 space-y-3">
+            {recentPayments.length > 0 ? (
+              recentPayments.map((payment) => (
+                <div
+                  key={`${payment.installmentNumber}-${payment.dueDateLabel}`}
+                  className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-900">
+                      Installment {payment.installmentNumber}
+                    </p>
+                    <p className="text-sm text-slate-500">Paid on {payment.dueDateLabel}</p>
+                  </div>
+                  <span className="font-semibold text-emerald-600">
+                    {formatPhpCurrency(payment.amount)}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+                No payment history yet. Your first completed installment will appear here.
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <div className="space-y-3">
           <button
             onClick={() => navigate("/user/catalog")}
-            className="w-full bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow flex items-center justify-between"
+            className="flex w-full items-center justify-between rounded-xl bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
           >
             <div className="flex items-center">
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mr-3">
+              <div className="mr-3 flex h-10 w-10 items-center justify-center rounded-full bg-blue-100">
                 <Bike className="text-blue-600" size={20} />
               </div>
               <div className="text-left">
@@ -259,12 +323,12 @@ export function Home() {
 
           <button
             onClick={() => navigate("/user/loan-details")}
-            className="w-full bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow flex items-center justify-between"
+            className="flex w-full items-center justify-between rounded-xl bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
           >
             <div className="flex items-center">
-              <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center mr-3">
+              <div className="mr-3 flex h-10 w-10 items-center justify-center rounded-full bg-purple-100">
                 <svg
-                  className="w-5 h-5 text-purple-600"
+                  className="h-5 w-5 text-purple-600"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -284,7 +348,6 @@ export function Home() {
             </div>
             <ChevronRight className="text-gray-400" size={20} />
           </button>
-
         </div>
       </div>
     </div>

@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Bell, Calendar, AlertCircle } from "lucide-react";
+import {
+  ArrowLeft,
+  Bell,
+  CalendarClock,
+  CircleAlert,
+  Clock3,
+  MapPinned,
+  PhoneCall,
+} from "lucide-react";
 import { useNavigate } from "react-router";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -19,8 +27,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
-import { getCurrentDemoUser, type DemoUserAccount } from "../../lib/demo-users";
+import {
+  evaluateDemoUserLocationAlert,
+  getCurrentDemoUser,
+  type DemoUserAccount,
+} from "../../lib/demo-users";
 import { formatPhpCurrency } from "../../lib/financing";
+import {
+  getNextUserInstallment,
+  getUpcomingUserPayments,
+  getUserLoanStatus,
+  getUserReminderTrigger,
+} from "../../lib/user-loan";
 
 type ReminderNotification = {
   id: string;
@@ -28,6 +46,8 @@ type ReminderNotification = {
   message: string;
   time: string;
   tone: "info" | "warning" | "success";
+  ctaLabel: string;
+  ctaPath: "/user/loan-details" | "/user/support" | "/user/account";
 };
 
 const DAILY_OVERDUE_PENALTY = 50;
@@ -35,9 +55,9 @@ const DAILY_OVERDUE_PENALTY = 50;
 export function Reminders() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<DemoUserAccount | null>(null);
-  const loan = currentUser?.loanProfile ?? null;
   const [selectedNotification, setSelectedNotification] =
     useState<ReminderNotification | null>(null);
+  const loan = currentUser?.loanProfile ?? null;
 
   useEffect(() => {
     let active = true;
@@ -45,29 +65,20 @@ export function Reminders() {
       const user = await getCurrentDemoUser();
       if (active) setCurrentUser(user);
     };
-    load();
+    void load();
     return () => {
       active = false;
     };
   }, []);
 
-  const nextInstallment = useMemo(() => {
-    if (!loan) return null;
-    const paidSet = new Set(loan.paidInstallmentNumbers ?? []);
-    const nextNumber = Array.from({ length: loan.termMonths }, (_, i) => i + 1).find(
-      (number) => !paidSet.has(number),
-    );
-    if (!nextNumber) return null;
-    const dueDate = new Date(loan.startDate);
-    dueDate.setHours(0, 0, 0, 0);
-    dueDate.setMonth(dueDate.getMonth() + (nextNumber - 1));
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dayMs = 24 * 60 * 60 * 1000;
-    const daysUntilDue = Math.round((dueDate.getTime() - today.getTime()) / dayMs);
-    const overdueDays = Math.max(-daysUntilDue, 0);
-    return { nextNumber, dueDate, daysUntilDue, overdueDays };
-  }, [loan]);
+  const nextInstallment = useMemo(() => getNextUserInstallment(loan), [loan]);
+  const upcomingPayments = useMemo(() => getUpcomingUserPayments(loan, 3), [loan]);
+  const loanStatus = useMemo(() => getUserLoanStatus(loan), [loan]);
+  const reminderTrigger = useMemo(() => getUserReminderTrigger(loan), [loan]);
+  const locationAlert = useMemo(
+    () => (currentUser ? evaluateDemoUserLocationAlert(currentUser) : null),
+    [currentUser],
+  );
 
   const reminderNotifications = useMemo(() => {
     const list: ReminderNotification[] = [];
@@ -79,6 +90,8 @@ export function Reminders() {
         message: "No due installment found yet. Admin will assign your loan schedule.",
         time: "Today",
         tone: "info",
+        ctaLabel: "Open Account",
+        ctaPath: "/user/account",
       });
       return list;
     }
@@ -89,46 +102,66 @@ export function Reminders() {
       year: "numeric",
     });
 
-    if (nextInstallment.daysUntilDue === 7) {
+    if (reminderTrigger?.kind === "due_7_days") {
       list.push({
-        id: "due-7-days",
-        title: "Payment Due in 7 Days",
-        message: `Installment ${nextInstallment.nextNumber} is due in 7 days (${dueDateLabel}).`,
+        id: `due-7-days-${nextInstallment.installmentNumber}-${nextInstallment.daysUntilDue}`,
+        title: reminderTrigger.title,
+        message: `${reminderTrigger.message} (${dueDateLabel}).`,
         time: "Today, 9:00 AM",
-        tone: "info",
+        tone: reminderTrigger.tone,
+        ctaLabel: "Review Loan",
+        ctaPath: "/user/loan-details",
       });
     }
 
-    if (nextInstallment.daysUntilDue === 3) {
+    if (reminderTrigger?.kind === "due_3_days") {
       list.push({
-        id: "due-3-days",
-        title: "Payment Due in 3 Days",
-        message: `Installment ${nextInstallment.nextNumber} is due in 3 days (${dueDateLabel}).`,
+        id: `due-3-days-${nextInstallment.installmentNumber}-${nextInstallment.daysUntilDue}`,
+        title: reminderTrigger.title,
+        message: `${reminderTrigger.message} (${dueDateLabel}).`,
         time: "Today, 9:00 AM",
-        tone: "warning",
+        tone: reminderTrigger.tone,
+        ctaLabel: "Review Loan",
+        ctaPath: "/user/loan-details",
       });
     }
 
-    if (nextInstallment.daysUntilDue === 0) {
+    if (reminderTrigger?.kind === "due_today") {
       list.push({
-        id: "due-today",
-        title: "Payment Due Today",
-        message: `Installment ${nextInstallment.nextNumber} is due today.`,
+        id: `due-today-${nextInstallment.installmentNumber}`,
+        title: reminderTrigger.title,
+        message: reminderTrigger.message,
         time: "Today, 9:00 AM",
-        tone: "warning",
+        tone: reminderTrigger.tone,
+        ctaLabel: "Contact Support",
+        ctaPath: "/user/support",
       });
     }
 
-    if (nextInstallment.daysUntilDue < 0) {
+    if (reminderTrigger?.kind === "overdue") {
       const penalty = nextInstallment.overdueDays * DAILY_OVERDUE_PENALTY;
       list.push({
-        id: "overdue-alert",
-        title: "Installment Overdue",
+        id: `overdue-alert-${nextInstallment.installmentNumber}-${nextInstallment.overdueDays}`,
+        title: reminderTrigger.title,
         message: `Overdue by ${nextInstallment.overdueDays} day(s). Penalty is ${formatPhpCurrency(
           penalty,
         )} (${formatPhpCurrency(DAILY_OVERDUE_PENALTY)}/day).`,
         time: "Today, 9:00 AM",
+        tone: reminderTrigger.tone,
+        ctaLabel: "Contact Support",
+        ctaPath: "/user/support",
+      });
+    }
+
+    if (locationAlert && locationAlert.status !== "tracking") {
+      list.push({
+        id: "location-status",
+        title: "Location Status Needs Attention",
+        message: locationAlert.message,
+        time: "Live status",
         tone: "warning",
+        ctaLabel: "Open Account",
+        ctaPath: "/user/account",
       });
     }
 
@@ -137,16 +170,17 @@ export function Reminders() {
         id: "no-trigger",
         title: "No Reminder Trigger Today",
         message:
-          "Alerts are automatically triggered at 7 days, 3 days, due today, and overdue.",
+          "Your account is on schedule. Alerts are triggered at 7 days, 3 days, due today, and overdue.",
         time: "Today, 9:00 AM",
-        tone: "info",
+        tone: "success",
+        ctaLabel: "View Loan",
+        ctaPath: "/user/loan-details",
       });
     }
 
     return list;
-  }, [loan, nextInstallment]);
+  }, [loan, nextInstallment, locationAlert, reminderTrigger]);
 
-  const paidCount = loan?.paidInstallmentNumbers.length ?? 0;
   const primaryAlert = reminderNotifications[0] ?? null;
 
   useEffect(() => {
@@ -156,13 +190,19 @@ export function Reminders() {
     const alertKey = primaryAlert.id;
     const lastShown = window.sessionStorage.getItem(storageKey);
     if (lastShown === alertKey) return;
-    const shouldAutoOpen =
-      primaryAlert.id !== "no-trigger" && primaryAlert.id !== "no-loan";
+    const shouldAutoOpen = !["no-trigger", "no-loan"].includes(primaryAlert.id);
     if (shouldAutoOpen) {
       window.sessionStorage.setItem(storageKey, alertKey);
       setSelectedNotification(primaryAlert);
     }
   }, [primaryAlert, currentUser]);
+
+  const locationCardClassName =
+    locationAlert?.status === "tracking"
+      ? "border-emerald-200 bg-emerald-50"
+      : locationAlert?.status === "stale"
+        ? "border-amber-200 bg-amber-50"
+        : "border-red-200 bg-red-50";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -180,19 +220,19 @@ export function Reminders() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                aria-label="Open recent notifications"
+                aria-label="Open reminder center"
                 className="relative rounded-full p-1 text-blue-600 hover:bg-blue-50"
               >
                 <Bell size={24} />
-                <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
-                  <span className="text-white text-[10px] font-bold">
+                <div className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500">
+                  <span className="text-[10px] font-bold text-white">
                     {reminderNotifications.length}
                   </span>
                 </div>
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72">
-              <DropdownMenuLabel>In-App Notifications</DropdownMenuLabel>
+              <DropdownMenuLabel>Reminder Center</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {reminderNotifications.map((notification) => (
                 <DropdownMenuItem
@@ -224,36 +264,25 @@ export function Reminders() {
           </DialogHeader>
           <p className="text-sm text-gray-700">{selectedNotification?.message}</p>
           <DialogFooter>
-            {selectedNotification?.tone === "warning" ? (
-              <Button
-                onClick={() => {
-                  setSelectedNotification(null);
-                  navigate("/user/support");
-                }}
-                className="bg-red-600 hover:bg-red-700 text-white"
-              >
-                Contact Support
-              </Button>
-            ) : (
-              <Button
-                onClick={() => {
-                  setSelectedNotification(null);
-                  navigate("/user/loan-details");
-                }}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                Open Loan Details
-              </Button>
-            )}
+            <Button
+              onClick={() => {
+                const path = selectedNotification?.ctaPath ?? "/user/loan-details";
+                setSelectedNotification(null);
+                navigate(path);
+              }}
+              className="bg-blue-600 text-white hover:bg-blue-700"
+            >
+              {selectedNotification?.ctaLabel ?? "Open"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <div className="px-6 py-6 space-y-4">
-        <Card className="bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-2xl p-6">
-          <div className="flex items-start justify-between mb-4">
+      <div className="space-y-4 px-6 py-6">
+        <Card className="rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-6 text-white">
+          <div className="mb-4 flex items-start justify-between">
             <div>
-              <p className="text-blue-100 mb-1">Next Installment Due</p>
+              <p className="mb-1 text-blue-100">Next Installment</p>
               <h2 className="text-3xl font-bold">
                 {nextInstallment
                   ? nextInstallment.dueDate.toLocaleDateString("en-US", {
@@ -263,53 +292,51 @@ export function Reminders() {
                     })
                   : "-"}
               </h2>
+              <p className="mt-2 text-sm text-blue-100">{loanStatus.message}</p>
             </div>
-            <Calendar className="text-blue-200" size={32} />
+            <CalendarClock className="text-blue-200" size={32} />
           </div>
-          <div className="bg-white/20 rounded-lg p-3 backdrop-blur-sm">
-            <p className="text-sm">
-              {nextInstallment ? (
-                nextInstallment.daysUntilDue >= 0 ? (
-                  <>
-                    <span className="font-semibold">{nextInstallment.daysUntilDue} day(s)</span>{" "}
-                    remaining for installment {nextInstallment.nextNumber}
-                  </>
-                ) : (
-                  <>
-                    Overdue by{" "}
-                    <span className="font-semibold">
-                      {nextInstallment.overdueDays} day(s)
-                    </span>
-                  </>
-                )
-              ) : (
-                "No active installment found."
-              )}
-            </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl bg-white/15 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-blue-100">Amount due</p>
+              <p className="mt-2 text-2xl font-bold">
+                {nextInstallment ? formatPhpCurrency(nextInstallment.amount) : "-"}
+              </p>
+            </div>
+            <div className="rounded-xl bg-white/15 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-blue-100">Status</p>
+              <p className="mt-2 text-lg font-bold">
+                {nextInstallment
+                  ? nextInstallment.overdueDays > 0
+                    ? `${nextInstallment.overdueDays} day(s) overdue`
+                    : nextInstallment.daysUntilDue === 0
+                      ? "Due today"
+                      : `${nextInstallment.daysUntilDue} day(s) remaining`
+                  : "No active installment"}
+              </p>
+            </div>
           </div>
         </Card>
 
         {nextInstallment && nextInstallment.overdueDays > 0 ? (
-          <Card className="bg-red-50 border-2 border-red-200 rounded-2xl p-5">
+          <Card className="rounded-2xl border-2 border-red-200 bg-red-50 p-5">
             <div className="flex items-start">
-              <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0 mr-3">
-                <AlertCircle className="text-white" size={24} />
+              <div className="mr-3 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-500">
+                <CircleAlert className="text-white" size={24} />
               </div>
               <div className="flex-1">
-                <h3 className="font-bold text-red-900 mb-1">Overdue Penalty Running</h3>
-                <p className="text-sm text-red-800 mb-3">
-                  Installment {nextInstallment.nextNumber} is overdue by{" "}
+                <h3 className="mb-1 font-bold text-red-900">Overdue Penalty Running</h3>
+                <p className="mb-3 text-sm text-red-800">
+                  Installment {nextInstallment.installmentNumber} is overdue by{" "}
                   {nextInstallment.overdueDays} day(s). Current penalty:{" "}
                   <span className="font-semibold">
-                    {formatPhpCurrency(
-                      nextInstallment.overdueDays * DAILY_OVERDUE_PENALTY,
-                    )}
+                    {formatPhpCurrency(nextInstallment.overdueDays * DAILY_OVERDUE_PENALTY)}
                   </span>{" "}
                   ({formatPhpCurrency(DAILY_OVERDUE_PENALTY)} per day).
                 </p>
                 <Button
                   onClick={() => navigate("/user/support")}
-                  className="bg-red-600 hover:bg-red-700 text-white rounded-lg"
+                  className="rounded-lg bg-red-600 text-white hover:bg-red-700"
                 >
                   Contact Support
                 </Button>
@@ -318,79 +345,154 @@ export function Reminders() {
           </Card>
         ) : null}
 
-        <Card className="rounded-2xl p-4 bg-green-50 border-green-100">
-          <p className="text-sm text-green-800">
-            Paid Installments: <span className="font-semibold">{paidCount}</span> /{" "}
-            {loan?.termMonths ?? 0}
-          </p>
-        </Card>
+        <div className="grid gap-4">
+          <Card className="rounded-2xl p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-slate-500">Reminder timeline</p>
+                <h3 className="text-lg font-bold text-slate-900">Recent in-app alerts</h3>
+              </div>
+              <Clock3 className="h-5 w-5 text-slate-500" />
+            </div>
+            <div className="mt-5 space-y-3">
+              {reminderNotifications.map((notification) => (
+                <button
+                  key={notification.id}
+                  onClick={() => setSelectedNotification(notification)}
+                  className={`w-full rounded-2xl border p-4 text-left transition-colors hover:bg-slate-50 ${
+                    notification.tone === "warning"
+                      ? "border-red-200"
+                      : notification.tone === "success"
+                        ? "border-emerald-200"
+                        : "border-blue-200"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="font-semibold text-slate-900">{notification.title}</p>
+                      <p className="mt-1 text-sm text-slate-600">{notification.message}</p>
+                      <p className="mt-2 text-xs text-slate-400">{notification.time}</p>
+                    </div>
+                    <span
+                      className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                        notification.tone === "warning"
+                          ? "bg-red-100 text-red-700"
+                          : notification.tone === "success"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-blue-100 text-blue-700"
+                      }`}
+                    >
+                      {notification.tone === "warning"
+                        ? "Action"
+                        : notification.tone === "success"
+                          ? "Clear"
+                          : "Info"}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </Card>
 
-        <Card className="rounded-xl p-4 border border-amber-200 bg-amber-50">
-          <div className="flex items-center justify-between gap-3">
+          <Card className="rounded-2xl p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-slate-500">Upcoming schedule</p>
+                <h3 className="text-lg font-bold text-slate-900">What to prepare for next</h3>
+              </div>
+              <CalendarClock className="h-5 w-5 text-blue-600" />
+            </div>
+            <div className="mt-5 space-y-3">
+              {upcomingPayments.length > 0 ? (
+                upcomingPayments.map((payment, index) => (
+                  <div
+                    key={`${payment.installmentNumber}-${payment.dueDateLabel}`}
+                    className={`rounded-2xl border p-4 ${
+                      index === 0 ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-white"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-slate-900">
+                            Installment {payment.installmentNumber}
+                          </p>
+                          {index === 0 ? (
+                            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                              Next
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="text-sm text-slate-500">Due on {payment.dueDateLabel}</p>
+                      </div>
+                      <span className="font-semibold text-blue-700">
+                        {formatPhpCurrency(payment.amount)}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+                  No upcoming installment was found for this account.
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {locationAlert ? (
+            <Card className={`rounded-2xl border p-5 ${locationCardClassName}`}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm text-slate-500">Location status</p>
+                  <h3 className="text-lg font-bold text-slate-900">Tracking visibility</h3>
+                  <p className="mt-2 text-sm text-slate-700">{locationAlert.message}</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {locationAlert.minutesSinceHeartbeat !== null
+                      ? `Last heartbeat ${locationAlert.minutesSinceHeartbeat} minute(s) ago`
+                      : "No heartbeat timestamp available yet"}
+                  </p>
+                </div>
+                <MapPinned
+                  className={
+                    locationAlert.status === "tracking"
+                      ? "text-emerald-600"
+                      : locationAlert.status === "stale"
+                        ? "text-amber-600"
+                        : "text-red-600"
+                  }
+                />
+              </div>
+            </Card>
+          ) : null}
+        </div>
+
+        <Card className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-amber-900">Alert Modal</p>
-              <p className="text-xs text-amber-800">
-                Tap to open the current in-app reminder as a modal alert.
+              <p className="text-sm text-amber-800">Need help now?</p>
+              <h3 className="text-lg font-bold text-amber-950">Quick actions</h3>
+              <p className="mt-1 text-sm text-amber-900">
+                Use support if you expect a delay, need clarification, or want to update account details.
               </p>
             </div>
+            <PhoneCall className="h-5 w-5 text-amber-700" />
+          </div>
+          <div className="mt-4 flex flex-wrap gap-3">
             <Button
-              onClick={() => {
-                if (primaryAlert) setSelectedNotification(primaryAlert);
-              }}
-              className="bg-amber-600 hover:bg-amber-700 text-white rounded-lg"
+              onClick={() => navigate("/user/support")}
+              className="rounded-xl bg-amber-600 text-white hover:bg-amber-700"
             >
-              Show Alert
+              Contact Support
+            </Button>
+            <Button
+              onClick={() => navigate("/user/loan-details")}
+              variant="outline"
+              className="rounded-xl border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+            >
+              Review Loan Details
             </Button>
           </div>
         </Card>
-
-        <Card className="rounded-xl p-4 bg-blue-50 border-blue-100">
-          <p className="text-sm text-blue-800">
-            Alerts are automatic by default: 7 days before, 3 days before, due
-            today, and overdue with daily penalty.
-          </p>
-        </Card>
-
-        <div>
-          <h3 className="font-semibold text-gray-900 mb-3">Recent In-App Alerts</h3>
-          <div className="space-y-3">
-            {reminderNotifications.map((notification) => (
-              <Card
-                key={notification.id}
-                className={`rounded-xl p-4 border-l-4 ${
-                  notification.tone === "warning"
-                    ? "border-l-red-600"
-                    : notification.tone === "success"
-                      ? "border-l-green-600"
-                      : "border-l-blue-600"
-                }`}
-              >
-                <div className="flex items-start">
-                  <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 mr-3 ${
-                      notification.tone === "warning"
-                        ? "bg-red-100"
-                        : notification.tone === "success"
-                          ? "bg-green-100"
-                          : "bg-blue-100"
-                    }`}
-                  >
-                    {notification.tone === "warning" ? (
-                      <AlertCircle className="text-red-600" size={20} />
-                    ) : (
-                      <Bell className="text-blue-600" size={20} />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-gray-900">{notification.title}</p>
-                    <p className="text-sm text-gray-600 mt-1">{notification.message}</p>
-                    <p className="text-xs text-gray-400 mt-2">{notification.time}</p>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -1,56 +1,169 @@
 import { createBrowserRouter } from "react-router";
-import { Login } from "./components/user/Login";
-import { RegisterShop } from "./components/user/RegisterShop";
-import { UserLayout } from "./components/user/UserLayout";
-import { Home } from "./components/user/Home";
-import { Reminders } from "./components/user/Reminders";
-import { Support } from "./components/user/Support";
-import { Offers } from "./components/user/Offers";
-import { LoanDetails } from "./components/user/LoanDetails";
-import { Catalog } from "./components/user/Catalog";
-import { CatalogDetails } from "./components/user/CatalogDetails";
-import { Account } from "./components/user/Account";
-import { AdminLayout } from "./components/admin/AdminLayout";
-import { AdminDashboard } from "./components/admin/AdminDashboard";
-import { AdminLoans } from "./components/admin/AdminLoans";
-import { AdminUsers } from "./components/admin/AdminUsers";
 import { NotFound } from "./components/NotFound";
+import { RoleGate } from "./components/auth/RoleGate";
+import { TenantAccessGate } from "./components/auth/TenantAccessGate";
 
 const userAppOnly = import.meta.env.VITE_USER_APP_ONLY === "true";
 
 const routes = [
   {
     path: "/",
-    Component: Login,
+    lazy: async () => ({
+      Component: (await import("./components/user/Login")).Login,
+    }),
   },
   {
     path: "/register-shop",
-    Component: RegisterShop,
+    lazy: async () => ({
+      Component: (await import("./components/user/RegisterShop")).RegisterShop,
+    }),
   },
   {
-    path: "/user",
-    Component: UserLayout,
+    path: "/accept-invite/:token",
+    lazy: async () => ({
+      Component: (await import("./components/user/AcceptInvite")).AcceptInvite,
+    }),
+  },
+  {
+    path: "/activate-account",
+    lazy: async () => ({
+      Component: (await import("./components/user/ActivateLegacyAccount"))
+        .ActivateLegacyAccount,
+    }),
+  },
+  {
+    element: <RoleGate allowedRoles={["tenant_user"]} />,
     children: [
-      { index: true, Component: Home },
-      { path: "catalog", Component: Catalog },
-      { path: "catalog/:id", Component: CatalogDetails },
-      { path: "reminders", Component: Reminders },
-      { path: "support", Component: Support },
-      { path: "offers", Component: Offers },
-      { path: "loan-details", Component: LoanDetails },
-      { path: "account", Component: Account },
+      {
+        element: <TenantAccessGate />,
+        children: [
+          {
+            path: "/user",
+            lazy: async () => ({
+              Component: (await import("./components/user/UserLayout")).UserLayout,
+            }),
+            children: [
+              {
+                index: true,
+                lazy: async () => ({
+                  Component: (await import("./components/user/Home")).Home,
+                }),
+              },
+              {
+                path: "catalog",
+                lazy: async () => ({
+                  Component: (await import("./components/user/Catalog")).Catalog,
+                }),
+              },
+              {
+                path: "catalog/:id",
+                lazy: async () => ({
+                  Component: (await import("./components/user/CatalogDetails"))
+                    .CatalogDetails,
+                }),
+              },
+              {
+                path: "reminders",
+                lazy: async () => ({
+                  Component: (await import("./components/user/Reminders")).Reminders,
+                }),
+              },
+              {
+                path: "support",
+                lazy: async () => ({
+                  Component: (await import("./components/user/Support")).Support,
+                }),
+              },
+              {
+                path: "offers",
+                lazy: async () => ({
+                  Component: (await import("./components/user/Offers")).Offers,
+                }),
+              },
+              {
+                path: "loan-details",
+                lazy: async () => ({
+                  Component: (await import("./components/user/LoanDetails")).LoanDetails,
+                }),
+              },
+              {
+                path: "account",
+                lazy: async () => ({
+                  Component: (await import("./components/user/Account")).Account,
+                }),
+              },
+            ],
+          },
+        ],
+      },
     ],
   },
 ];
 
 if (!userAppOnly) {
   routes.push({
-    path: "/admin",
-    Component: AdminLayout,
+    element: <RoleGate allowedRoles={["tenant_admin"]} />,
     children: [
-      { index: true, Component: AdminDashboard },
-      { path: "loans", Component: AdminLoans },
-      { path: "users", Component: AdminUsers },
+      {
+        element: <TenantAccessGate />,
+        children: [
+          {
+            path: "/admin",
+            lazy: async () => ({
+              Component: (await import("./components/admin/AdminLayout")).AdminLayout,
+            }),
+            children: [
+              {
+                index: true,
+                lazy: async () => ({
+                  Component: (await import("./components/admin/AdminDashboard"))
+                    .AdminDashboard,
+                }),
+              },
+              {
+                path: "loans",
+                lazy: async () => ({
+                  Component: (await import("./components/admin/AdminLoans")).AdminLoans,
+                }),
+              },
+              {
+                path: "users",
+                lazy: async () => ({
+                  Component: (await import("./components/admin/AdminUsers")).AdminUsers,
+                }),
+              },
+              {
+                path: "reports",
+                lazy: async () => ({
+                  Component: (await import("./components/admin/AdminReports")).AdminReports,
+                }),
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  routes.push({
+    element: <RoleGate allowedRoles={["super_admin"]} />,
+    children: [
+      {
+        path: "/super-admin",
+        lazy: async () => ({
+          Component: (await import("./components/super-admin/SuperAdminLayout"))
+            .SuperAdminLayout,
+        }),
+        children: [
+          {
+            index: true,
+            lazy: async () => ({
+              Component: (await import("./components/super-admin/SuperAdminDashboard"))
+                .SuperAdminDashboard,
+            }),
+          },
+        ],
+      },
     ],
   });
 }

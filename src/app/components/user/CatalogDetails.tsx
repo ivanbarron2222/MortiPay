@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Heart, BadgePercent } from "lucide-react";
+import { ArrowLeft, Heart, BadgePercent, Bike, Calculator, CheckCircle2 } from "lucide-react";
 import { useNavigate, useParams } from "react-router";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -42,7 +42,7 @@ export function CatalogDetails() {
     return (
       <div className="min-h-screen bg-gray-50 p-6">
         <Card className="rounded-xl p-6 text-center">
-          <p className="text-gray-700 mb-4">Motorcycle not found.</p>
+          <p className="mb-4 text-gray-700">Motorcycle not found.</p>
           <Button onClick={() => navigate("/user/catalog")} className="bg-blue-600 text-white">
             Back to Catalog
           </Button>
@@ -63,18 +63,18 @@ export function CatalogDetails() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="relative h-56">
+      <div className="relative h-64">
         <ImageWithFallback
           src={item.image}
           alt={`${item.brand} ${item.model}`}
-          className="w-full h-full object-cover"
+          className="h-full w-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-black/15" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent" />
 
-        <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
+        <div className="absolute left-4 right-4 top-4 flex items-center justify-between">
           <button
             onClick={() => navigate("/user/catalog")}
-            className="bg-white/95 rounded-full p-2 text-gray-800"
+            className="rounded-full bg-white/95 p-2 text-gray-800"
             aria-label="Back to catalog"
           >
             <ArrowLeft size={20} />
@@ -82,39 +82,70 @@ export function CatalogDetails() {
 
           <button
             onClick={() => setFavoriteIds(toggleFavoriteCatalogId(item.id))}
-            className="bg-white/95 rounded-full p-2 text-gray-800"
+            className="rounded-full bg-white/95 p-2 text-gray-800"
             aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
           >
-            <Heart size={20} className={isFavorite ? "fill-red-500 text-red-500" : ""} />
+            <Heart size={20} className={isFavorite ? "fill-rose-500 text-rose-500" : ""} />
           </button>
         </div>
 
         <div className="absolute bottom-4 left-4 right-4 text-white">
-          <h1 className="text-2xl font-bold">
+          {item.promoTag ? (
+            <span className="mb-3 inline-flex rounded-full bg-white/95 px-3 py-1 text-[11px] font-semibold text-slate-950">
+              {item.promoTag}
+            </span>
+          ) : null}
+          <h1 className="text-3xl font-bold">
             {item.brand} {item.model}
           </h1>
-          <p className="text-sm text-white/90">
-            {item.year} • {item.engineCc}cc
+          <p className="mt-1 text-sm text-white/85">
+            {item.year} • {item.engineCc}cc • {item.status.replaceAll("_", " ")}
           </p>
         </div>
       </div>
 
-      <div className="px-6 py-5 space-y-4">
-        <Card className="rounded-2xl p-4">
-          <p className="text-sm text-gray-600 mb-1">SRP</p>
-          <p className="text-3xl font-bold text-gray-900">{formatPhpCurrency(item.price)}</p>
-          <p className="text-sm text-gray-600 mt-2">{item.description}</p>
-        </Card>
-
-        <Card className="rounded-2xl p-4">
-          <div className="flex items-center mb-3">
-            <BadgePercent size={18} className="text-blue-600 mr-2" />
-            <p className="font-semibold text-gray-900">Financing Simulator</p>
+      <div className="space-y-4 px-4 py-5 sm:px-6">
+        <Card className="rounded-3xl p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Catalog Summary</p>
+              <h2 className="mt-2 text-2xl font-bold text-slate-950">
+                {formatPhpCurrency(item.price)}
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">{item.description}</p>
+            </div>
+            <div className="rounded-full bg-blue-100 p-3 text-blue-700">
+              <Bike size={18} />
+            </div>
           </div>
 
-          <div className="space-y-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-2xl bg-slate-100 p-4">
+              <p className="text-sm text-slate-500">Estimated Monthly</p>
+              <p className="mt-1 text-2xl font-bold text-slate-950">
+                {formatPhpCurrency(estimate.monthlyPayment)}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">{months} months</p>
+            </div>
+            <div className="rounded-2xl bg-slate-100 p-4">
+              <p className="text-sm text-slate-500">Suggested Downpayment</p>
+              <p className="mt-1 text-2xl font-bold text-slate-950">
+                {formatPhpCurrency(normalizedDownPayment)}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">Adjust below to compare</p>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="rounded-3xl p-4 shadow-sm">
+          <div className="mb-4 flex items-center gap-2">
+            <Calculator size={18} className="text-blue-600" />
+            <p className="font-semibold text-slate-950">Financing Simulator</p>
+          </div>
+
+          <div className="space-y-4">
             <div>
-              <p className="text-xs text-gray-600 mb-2">Down payment</p>
+              <p className="mb-2 text-xs text-slate-500">Downpayment</p>
               <Input
                 type="number"
                 min={0}
@@ -122,31 +153,27 @@ export function CatalogDetails() {
                 value={downPayment}
                 onChange={(event) => {
                   const next = Number(event.target.value);
-                  if (Number.isNaN(next)) {
-                    setDownPayment(0);
-                    return;
-                  }
-                  setDownPayment(next);
+                  setDownPayment(Number.isNaN(next) ? 0 : next);
                 }}
-                className="rounded-lg"
+                className="rounded-2xl"
                 placeholder="Enter down payment amount"
               />
-              <p className="text-[11px] text-gray-500 mt-1">
-                Accepted range: {formatPhpCurrency(0)} to {formatPhpCurrency(item.price)}
+              <p className="mt-1 text-[11px] text-slate-500">
+                Range: {formatPhpCurrency(0)} to {formatPhpCurrency(item.price)}
               </p>
             </div>
 
             <div>
-              <p className="text-xs text-gray-600 mb-2">Loan term</p>
+              <p className="mb-2 text-xs text-slate-500">Loan term</p>
               <div className="grid grid-cols-4 gap-2">
                 {item.availableTerms.map((term) => (
                   <button
                     key={term}
                     onClick={() => setMonths(term)}
-                    className={`rounded-lg py-2 text-xs font-semibold border ${
+                    className={`rounded-2xl py-2 text-xs font-semibold border ${
                       months === term
                         ? "bg-blue-600 text-white border-blue-600"
-                        : "bg-white text-gray-700 border-gray-300"
+                        : "bg-white text-slate-700 border-slate-300"
                     }`}
                   >
                     {term} mo
@@ -157,52 +184,84 @@ export function CatalogDetails() {
           </div>
         </Card>
 
-        <Card className="rounded-2xl p-4 bg-blue-50 border-blue-100">
-          <p className="text-sm font-semibold text-blue-900 mb-3">
-            Financing Quotation
-          </p>
+        <Card className="rounded-3xl border-blue-100 bg-blue-50 p-4 shadow-sm">
+          <div className="mb-3 flex items-center gap-2">
+            <BadgePercent size={18} className="text-blue-700" />
+            <p className="font-semibold text-blue-950">Quotation Summary</p>
+          </div>
+
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-gray-700">SRP</span>
-              <span className="font-semibold text-gray-900">
+              <span className="text-slate-600">SRP</span>
+              <span className="font-semibold text-slate-950">
                 {formatPhpCurrency(item.price)}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-700">Down payment</span>
-              <span className="font-semibold text-gray-900">
+              <span className="text-slate-600">Downpayment</span>
+              <span className="font-semibold text-slate-950">
                 {formatPhpCurrency(normalizedDownPayment)}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-700">Principal financed</span>
-              <span className="font-semibold text-gray-900">
+              <span className="text-slate-600">Principal Financed</span>
+              <span className="font-semibold text-slate-950">
                 {formatPhpCurrency(estimate.principal)}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-700">Estimated interest ({months} months)</span>
-              <span className="font-semibold text-gray-900">
+              <span className="text-slate-600">Estimated Interest</span>
+              <span className="font-semibold text-slate-950">
                 {formatPhpCurrency(estimatedInterest)}
               </span>
             </div>
-            <div className="flex justify-between border-t pt-2 mt-2">
-              <span className="text-gray-800 font-semibold">Total payable</span>
-              <span className="font-bold text-gray-900">
+            <div className="mt-2 flex justify-between border-t border-blue-100 pt-2">
+              <span className="font-semibold text-slate-950">Total Payable</span>
+              <span className="font-bold text-slate-950">
                 {formatPhpCurrency(estimate.totalPayable)}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-blue-800 font-semibold">Estimated monthly</span>
+              <span className="font-semibold text-blue-800">Estimated Monthly</span>
               <span className="font-bold text-blue-900">
                 {formatPhpCurrency(estimate.monthlyPayment)}
               </span>
             </div>
           </div>
-          <p className="text-xs text-blue-800 mt-3">
-            Quotation only. Final amortization will be provided by admin.
-          </p>
+
+          <div className="mt-4 rounded-2xl bg-white px-4 py-3 text-sm text-slate-600">
+            Final amortization and approval still depend on the tenant admin review.
+          </div>
         </Card>
+
+        <Card className="rounded-3xl p-4 shadow-sm">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={18} className="text-emerald-600" />
+            <p className="font-semibold text-slate-950">Why this unit may fit</p>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {item.availableTerms.map((term) => (
+              <span
+                key={term}
+                className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600"
+              >
+                {term} month option
+              </span>
+            ))}
+            {item.promoTag ? (
+              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">
+                {item.promoTag}
+              </span>
+            ) : null}
+          </div>
+        </Card>
+
+        <Button
+          onClick={() => navigate("/user/support")}
+          className="w-full rounded-2xl bg-blue-600 text-white hover:bg-blue-700"
+        >
+          Ask Admin About This Motorcycle
+        </Button>
       </div>
     </div>
   );

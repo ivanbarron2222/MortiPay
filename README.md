@@ -42,7 +42,17 @@ Default seeded credentials:
 - The app now scopes users by tenant/shop.
 - `VITE_TENANT_SLUG` selects which shop data is loaded.
 - Each shop has isolated user records in `app_users` via `tenant_id`.
-- To onboard a new motorcycle shop, set a new tenant slug (for example `VITE_TENANT_SLUG=wheeltek-bulacan`), then run the app. The tenant row is auto-created when missing.
+- Under the stricter auth/RLS model, tenants are not auto-created during login. New shops must be created through the shop registration flow or inserted explicitly in Supabase.
+- Tenant admins can now create pending tenant-user invites and share the `/accept-invite/:token` activation link.
+
+## Implementation Roadmap
+
+- SaaS migration phases and role model: [guidelines/SaaS-Implementation-Phases.md](/c:/Thesis Project/Motorcycle Financing App UI/guidelines/SaaS-Implementation-Phases.md)
+  - Includes `Completed`, `In Progress`, and `Remaining` tracking per phase.
+  - Includes a dedicated tenant dashboard analytics phase for KPI, collections, risk, and premium-report planning.
+  - Includes the freemium feature matrix for `Free` vs `Premium` tenant-admin capabilities.
+  - Includes a dedicated tenant-user UX phase for payment clarity, reminders, history, and support improvements.
+- QA and verification checklist: [guidelines/QA-Checklist.md](/c:/Thesis Project/Motorcycle Financing App UI/guidelines/QA-Checklist.md)
 
 ## Run App
 
