@@ -142,6 +142,13 @@ type DbLegacyActivationRow = {
   display_name: string;
 };
 
+type DbTenantRow = {
+  id: string;
+  slug: string;
+  name: string;
+  owner_email: string;
+};
+
 type PendingShopRegistration = {
   shopName: string;
   ownerFullName: string;
@@ -150,6 +157,9 @@ type PendingShopRegistration = {
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+const APP_ORIGIN = (
+  import.meta.env.VITE_APP_ORIGIN?.trim() || "https://morti-pay.vercel.app"
+).replace(/\/+$/, "");
 const SUPABASE_USERS_TABLE = "app_users";
 const SUPABASE_TENANTS_TABLE = "tenants";
 const SUPABASE_PLATFORM_ADMINS_TABLE = "platform_admins";
@@ -162,6 +172,18 @@ let supabaseTenantIdCache: string | null = null;
 
 export function clearSupabaseTenantCache() {
   supabaseTenantIdCache = null;
+}
+
+function getErrorMessage(error: unknown, fallback = "Unknown database error") {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const parts = ["message", "details", "hint", "code"]
+      .map((key) => record[key])
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+    if (parts.length > 0) return parts.join(" ");
+  }
+  return fallback;
 }
 
 export const LOCATION_STALE_AFTER_MINUTES = 5;
@@ -345,9 +367,14 @@ function mapLegacyActivationRow(
   };
 }
 
-function getAppOrigin() {
+export function getAppOrigin() {
+  if (APP_ORIGIN) return APP_ORIGIN;
   if (typeof window === "undefined") return undefined;
   return window.location.origin;
+}
+
+export function getAcceptInviteUrl(token: string) {
+  return `${getAppOrigin() ?? ""}/accept-invite/${token}`;
 }
 
 function normalizePendingShopRegistration(
@@ -475,6 +502,16 @@ async function createOrSignInSupabaseAuthAccount(params: {
     await supabase.auth.signOut();
   }
 
+  const existingSignIn = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password: params.password,
+  });
+
+  if (!existingSignIn.error) {
+    const authUserId = await getAuthenticatedSupabaseUserId();
+    if (authUserId) return authUserId;
+  }
+
   const { error: signUpError } = await supabase.auth.signUp({
     email: normalizedEmail,
     password: params.password,
@@ -482,19 +519,9 @@ async function createOrSignInSupabaseAuthAccount(params: {
   });
 
   if (signUpError) {
-    const signInResult = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password: params.password,
-    });
-
-    if (!signInResult.error) {
-      const authUserId = await getAuthenticatedSupabaseUserId();
-      if (authUserId) return authUserId;
-    }
-
     if (isSupabaseEmailRateLimitError(signUpError)) {
       throw new Error(
-        "Supabase email rate limit reached. If this account was already created, use the same password to log in. Otherwise wait a few minutes before trying again.",
+        "Supabase email limit is temporarily reached. If you already received a confirmation email, open it to continue. Otherwise wait a few minutes before trying again.",
       );
     }
 
@@ -662,6 +689,75 @@ async function supabaseCreateInvite(payload: {
 
   if (error) throw new Error(`Unable to create invite. ${error.message}`);
   return mapInviteRow(data as DbInviteRow);
+}
+
+async function createTenantForRegistration(params: {
+  slug: string;
+  ownerEmail: string;
+}) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const insertPayload = {
+    slug: params.slug,
+    name: tenantSlugToName(params.slug),
+    owner_email: params.ownerEmail,
+  };
+
+  const { data, error } = await supabase
+    .from(SUPABASE_TENANTS_TABLE)
+    .insert(insertPayload)
+    .select("id, slug, name, owner_email")
+    .single();
+
+  if (!error) return data as DbTenantRow;
+
+  if (!error.message.toLowerCase().includes("row-level security")) {
+    throw error;
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    "dev_create_tenant_for_registration",
+    {
+      tenant_slug: params.slug,
+      tenant_name: tenantSlugToName(params.slug),
+      tenant_owner_email: params.ownerEmail,
+    },
+  );
+
+  if (rpcError) throw rpcError;
+  return rpcData as DbTenantRow;
+}
+
+async function createTenantAdminForRegistration(params: {
+  tenantId: string;
+  adminUser: DemoUserAccount;
+}) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+
+  const { data, error } = await supabase
+    .from(SUPABASE_USERS_TABLE)
+    .insert(toDbInsert(params.adminUser, params.tenantId))
+    .select("*")
+    .single();
+
+  if (!error) return data as DbUserRow;
+
+  if (!error.message.toLowerCase().includes("row-level security")) {
+    throw error;
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    "dev_create_tenant_admin_for_registration",
+    {
+      target_tenant_id: params.tenantId,
+      admin_id: params.adminUser.id,
+      admin_full_name: params.adminUser.fullName,
+      admin_email: params.adminUser.email,
+      admin_phone: params.adminUser.phone,
+    },
+  );
+
+  if (rpcError) throw rpcError;
+  return rpcData as DbUserRow;
 }
 
 async function supabaseLookupLegacyAccountForActivation(params: {
@@ -1372,23 +1468,25 @@ export async function registerShop(params: {
     };
   }
 
-  const { data: tenant, error: tenantError } = await supabase
-    .from(SUPABASE_TENANTS_TABLE)
-    .insert({ slug, name: tenantSlugToName(slug), owner_email: normalizedEmail })
-    .select("id")
-    .single();
-  if (tenantError) {
+  let tenant: DbTenantRow;
+  try {
+    tenant = await createTenantForRegistration({
+      slug,
+      ownerEmail: normalizedEmail,
+    });
+  } catch (tenantError) {
     await supabase.auth.signOut();
     clearPendingShopRegistration();
-    const isPolicyError = tenantError.message.toLowerCase().includes("row-level security");
+    const messageText = getErrorMessage(tenantError);
+    const isPolicyError = messageText.toLowerCase().includes("row-level security");
     const message =
       isPolicyError
-        ? "Could not create shop because Supabase rejected the tenant insert. Confirm the email link first, then retry. If it still fails, re-run the latest supabase/schema.sql policies in Supabase."
-        : tenantError.message.includes("tenants_slug_key")
+        ? "Could not create shop because Supabase rejected the tenant insert. Re-run the updated supabase/dev-bypass-tenant-registration.sql in Supabase SQL Editor, then retry."
+        : messageText.includes("tenants_slug_key")
         ? `Shop code "${slug}" is already taken. Try a different shop name.`
-        : tenantError.message.includes("tenants_owner_email_idx")
+        : messageText.includes("tenants_owner_email_idx")
           ? "An account with this email already exists."
-          : `Could not create shop: ${tenantError.message}`;
+          : `Could not create shop: ${messageText}`;
     return { user: null, error: message, pendingEmailConfirmation: false };
   }
 
@@ -1404,18 +1502,20 @@ export async function registerShop(params: {
     locationTracking: getDefaultLocationTracking(),
   };
 
-  const { data: insertedUser, error: userError } = await supabase
-    .from(SUPABASE_USERS_TABLE)
-    .insert(toDbInsert(adminUser, tenant.id as string))
-    .select("*")
-    .single();
-
-  if (userError) {
+  let insertedUser: DbUserRow;
+  try {
+    insertedUser = await createTenantAdminForRegistration({
+      tenantId: tenant.id as string,
+      adminUser,
+    });
+  } catch (userError) {
     await supabase.from(SUPABASE_TENANTS_TABLE).delete().eq("id", tenant.id);
     clearPendingShopRegistration();
     return {
       user: null,
-      error: `Could not create admin account: ${userError.message}`,
+      error: `Could not create admin account: ${
+        getErrorMessage(userError)
+      }`,
       pendingEmailConfirmation: false,
     };
   }
@@ -1423,7 +1523,7 @@ export async function registerShop(params: {
   setActiveTenantSlug(slug);
   clearSupabaseTenantCache();
   clearPendingShopRegistration();
-  const created = fromDbRow(insertedUser as DbUserRow);
+  const created = fromDbRow(insertedUser);
   setCurrentDemoUserId(created.id);
   setCurrentDemoUserRole(created.role);
   return { user: created, error: null, pendingEmailConfirmation: false };
@@ -1719,22 +1819,23 @@ export async function completePendingShopRegistration() {
     return { user: existingAccount, error: null };
   }
 
-  const { data: tenant, error: tenantError } = await supabase
-    .from(SUPABASE_TENANTS_TABLE)
-    .insert({ slug, name: tenantSlugToName(slug), owner_email: normalizedEmail })
-    .select("id")
-    .single();
-
-  if (tenantError) {
-    const isPolicyError = tenantError.message.toLowerCase().includes("row-level security");
+  let tenant: DbTenantRow;
+  try {
+    tenant = await createTenantForRegistration({
+      slug,
+      ownerEmail: normalizedEmail,
+    });
+  } catch (tenantError) {
+    const messageText = getErrorMessage(tenantError);
+    const isPolicyError = messageText.toLowerCase().includes("row-level security");
     const message =
       isPolicyError
-        ? "Could not create shop because Supabase rejected the tenant insert. Confirm the email link first, then retry. If it still fails, re-run the latest supabase/schema.sql policies in Supabase."
-        : tenantError.message.includes("tenants_slug_key")
+        ? "Could not create shop because Supabase rejected the tenant insert. Re-run the updated supabase/dev-bypass-tenant-registration.sql in Supabase SQL Editor, then retry."
+        : messageText.includes("tenants_slug_key")
         ? `Shop code "${slug}" is already taken. Try a different shop name.`
-        : tenantError.message.includes("tenants_owner_email_idx")
+        : messageText.includes("tenants_owner_email_idx")
           ? "An account with this email already exists."
-          : `Could not create shop: ${tenantError.message}`;
+          : `Could not create shop: ${messageText}`;
     return { user: null, error: message };
   }
 
@@ -1750,15 +1851,20 @@ export async function completePendingShopRegistration() {
     locationTracking: getDefaultLocationTracking(),
   };
 
-  const { data: insertedUser, error: userError } = await supabase
-    .from(SUPABASE_USERS_TABLE)
-    .insert(toDbInsert(adminUser, tenant.id as string))
-    .select("*")
-    .single();
-
-  if (userError) {
+  let insertedUser: DbUserRow;
+  try {
+    insertedUser = await createTenantAdminForRegistration({
+      tenantId: tenant.id as string,
+      adminUser,
+    });
+  } catch (userError) {
     await supabase.from(SUPABASE_TENANTS_TABLE).delete().eq("id", tenant.id);
-    return { user: null, error: `Could not create admin account: ${userError.message}` };
+    return {
+      user: null,
+      error: `Could not create admin account: ${
+        getErrorMessage(userError)
+      }`,
+    };
   }
 
   setActiveTenantSlug(slug);
@@ -1766,7 +1872,7 @@ export async function completePendingShopRegistration() {
   clearPendingShopRegistration();
   await clearPendingShopRegistrationFromAuthMetadata();
 
-  const created = fromDbRow(insertedUser as DbUserRow);
+  const created = fromDbRow(insertedUser);
   setCurrentDemoUserId(created.id);
   setCurrentDemoUserRole(created.role);
   return { user: created, error: null };

@@ -5,6 +5,7 @@ import { Search, Link2, Lock } from "lucide-react";
 import {
   createDemoUserWithLoan,
   evaluateDemoUserLocationAlert,
+  getAcceptInviteUrl,
   getDemoUsers,
   getTenantUserInvites,
   type DemoUserAccount,
@@ -122,8 +123,7 @@ export function AdminUsers() {
   const getGoogleMapsUrl = (latitude: number, longitude: number) =>
     `https://www.google.com/maps?q=${latitude},${longitude}`;
 
-  const getInviteUrl = (token: string) =>
-    `${window.location.origin}/accept-invite/${token}`;
+  const getInviteUrl = (token: string) => getAcceptInviteUrl(token);
 
   return (
     <div className="p-8 space-y-6">

@@ -24,6 +24,7 @@ import {
   DialogFooter,
   DialogTitle,
 } from "../ui/dialog";
+import { AdminAIAssistant } from "./AdminAIAssistant";
 
 export function AdminLayout() {
   const navigate = useNavigate();
@@ -105,10 +106,10 @@ export function AdminLayout() {
           sidebarOpen ? "w-64" : "w-20"
         }`}
       >
-        <div className="flex h-full flex-col p-6">
+        <div className={`flex h-full flex-col ${sidebarOpen ? "p-6" : "p-4"}`}>
           <div
             className={`mb-8 flex items-center ${
-              sidebarOpen ? "justify-between" : "justify-center"
+              sidebarOpen ? "justify-between" : "flex-col justify-center gap-3"
             }`}
           >
             {sidebarOpen ? (
@@ -119,39 +120,22 @@ export function AdminLayout() {
                   className="h-15 w-15 rounded-md object-contain"
                 />
                 <div>
-                  <h1 className="text-xl font-bold text-blue-600">MORTI Pay</h1>
                   <p className="text-xs text-gray-600">Tenant Admin Portal</p>
-                  {tenant ? (
-                    <div
-                      className={`mt-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${planBadgeClass}`}
-                    >
-                      <Crown size={12} />
-                      {planLabel} Plan
-                    </div>
-                  ) : null}
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center gap-2">
+              <div className="flex flex-col items-center">
                 <img
                   src="/noBG_mortipay.png"
                   alt="Morti Pay"
                   className="h-10 w-10 rounded-md object-contain"
                 />
-                {tenant ? (
-                  <div
-                    className={`inline-flex items-center justify-center rounded-full border p-2 ${planBadgeClass}`}
-                    title={`${planLabel} Plan`}
-                  >
-                    <Crown size={12} />
-                  </div>
-                ) : null}
               </div>
             )}
 
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-gray-100"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-gray-100"
             >
               <Menu size={20} />
             </button>
@@ -168,7 +152,7 @@ export function AdminLayout() {
                   className={`flex items-center rounded-lg transition-colors ${
                     sidebarOpen
                       ? "w-full justify-start px-4 py-3"
-                      : "mx-auto h-12 w-12 justify-center"
+                      : "h-12 w-12 justify-center"
                   } ${
                     isActive
                       ? "bg-blue-600 text-white"
@@ -193,7 +177,7 @@ export function AdminLayout() {
                 className={`flex items-center rounded-lg transition-colors ${
                   sidebarOpen
                     ? "w-full justify-start bg-blue-50 px-4 py-3 text-blue-700 hover:bg-blue-100"
-                    : "mx-auto h-12 w-12 justify-center bg-blue-50 text-blue-700 hover:bg-blue-100"
+                    : "h-12 w-12 justify-center bg-blue-50 text-blue-700 hover:bg-blue-100"
                 }`}
                 title={hasPendingPremiumRequest ? "Premium Pending" : "Upgrade to Premium"}
               >
@@ -208,6 +192,27 @@ export function AdminLayout() {
           ) : null}
 
           <div className="mt-4 space-y-2 border-t border-gray-200 pt-4">
+            {tenant ? (
+              <div
+                className={`flex items-center rounded-lg border ${planBadgeClass} ${
+                  sidebarOpen
+                    ? "w-full justify-start px-4 py-3"
+                    : "h-12 w-12 justify-center"
+                }`}
+                title={`${planLabel} Plan`}
+              >
+                <Crown size={18} className="flex-shrink-0" />
+                {sidebarOpen ? (
+                  <div className="ml-3 leading-tight">
+                    <p className="text-[11px] font-medium uppercase tracking-wide opacity-75">
+                      Current Plan
+                    </p>
+                    <p className="text-sm font-semibold">{planLabel}</p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <button
               onClick={() => {
                 logoutDemoUser();
@@ -216,7 +221,7 @@ export function AdminLayout() {
               className={`flex items-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 ${
                 sidebarOpen
                   ? "w-full justify-start px-4 py-3"
-                  : "mx-auto h-12 w-12 justify-center"
+                  : "h-12 w-12 justify-center"
               }`}
             >
               <LogOut size={20} className="flex-shrink-0" />
@@ -229,6 +234,8 @@ export function AdminLayout() {
       <main className="h-screen flex-1 overflow-y-auto">
         <Outlet />
       </main>
+
+      {isPremium && tenant ? <AdminAIAssistant tenant={tenant} /> : null}
 
       <Dialog open={showPlanDialog} onOpenChange={setShowPlanDialog}>
         <DialogContent className="max-w-2xl overflow-hidden rounded-2xl border-0 p-0">

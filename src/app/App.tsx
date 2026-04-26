@@ -39,7 +39,7 @@ function App() {
             alt="Morti Pay"
             className="w-96 h-96 object-contain mx-auto mb-4"
           />
-          <h1 className="text-3xl font-bold">Morti Pay</h1>
+          <h1 className="text-3xl font-bold">MORTI Pay</h1>
           <p className="text-blue-100 mt-1">Motorcycle Financing App</p>
           <div className="mt-5 w-10 h-10 mx-auto rounded-full border-4 border-white/30 border-t-white animate-spin" />
         </div>

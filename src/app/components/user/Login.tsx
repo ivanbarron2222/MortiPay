@@ -99,23 +99,12 @@ export function Login() {
     <div className="min-h-screen bg-gradient-to-b from-blue-600 to-blue-800 flex items-center justify-center p-4">
       <div className="w-full max-w-[390px] bg-white rounded-3xl p-8 shadow-2xl">
         <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg
-              className="w-10 h-10 text-white"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M13 10V3L4 14h7v7l9-11h-7z"
-              />
-            </svg>
-          </div>
-          <h1 className="text-3xl font-bold text-gray-900">Morti Pay</h1>
-          <p className="text-gray-600 mt-2">Monitoring Real-Time Installment Payments</p>
+          <img
+            src="/noBG_mortipay.png"
+            alt="Morti Pay"
+            className="mx-auto h-48 w-48 object-contain"
+          />
+          <p className="text-gray-600 ">Monitoring Real-Time Installment Payments</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
@@ -203,7 +192,7 @@ export function Login() {
           ) : null}
         </div>
 
-        <div className="mt-4 p-4 bg-blue-50 rounded-xl">
+        {/* <div className="mt-4 p-4 bg-blue-50 rounded-xl">
           <p className="text-xs text-blue-800 text-center font-medium mb-1">
             Demo Accounts
           </p>
@@ -219,7 +208,7 @@ export function Login() {
           <p className="text-[10px] text-blue-700 text-center mt-1">
             API: {apiBaseUrl}
           </p>
-        </div>
+        </div> */}
       </div>
     </div>
   );

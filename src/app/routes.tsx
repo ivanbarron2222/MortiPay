@@ -155,6 +155,21 @@ if (!userAppOnly) {
                 .SuperAdminDashboard,
             }),
           },
+          {
+            path: "tenants",
+            lazy: async () => ({
+              Component: (await import("./components/super-admin/SuperAdminTenants"))
+                .SuperAdminTenants,
+            }),
+          },
+          {
+            path: "premium-requests",
+            lazy: async () => ({
+              Component: (
+                await import("./components/super-admin/SuperAdminPremiumRequests")
+              ).SuperAdminPremiumRequests,
+            }),
+          },
         ],
       },
     ],

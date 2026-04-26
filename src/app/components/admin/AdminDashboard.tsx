@@ -1,15 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
   AlertTriangle,
   BarChart3,
   CalendarClock,
   CreditCard,
-  Crown,
   FileText,
   Lock,
   Users,
 } from "lucide-react";
 import { Card } from "../ui/card";
+import {
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "../ui/chart";
 import {
   evaluateDemoUserLocationAlert,
   getDemoUsers,
@@ -24,6 +39,20 @@ import {
   getCurrentTenantSummary,
   type TenantSummary,
 } from "../../lib/platform";
+
+const collectionChartConfig = {
+  value: {
+    label: "Collected",
+    color: "#16a34a",
+  },
+};
+
+const duePipelineChartConfig = {
+  value: {
+    label: "Due",
+    color: "#2563eb",
+  },
+};
 
 export function AdminDashboard() {
   const [users, setUsers] = useState<DemoUserAccount[]>([]);
@@ -65,6 +94,10 @@ export function AdminDashboard() {
 
   const isPremium = tenant?.plan === "premium";
   const hasPendingPremiumRequest = tenant?.requestedPlan === "premium";
+  const maxRiskSegment = Math.max(
+    ...analytics.riskSegments.map((entry) => entry.value),
+    1,
+  );
 
   const stats = [
     {
@@ -91,15 +124,6 @@ export function AdminDashboard() {
       icon: BarChart3,
       color: "bg-emerald-100 text-emerald-700",
     },
-    {
-      title: "Current Plan",
-      value: tenant?.plan === "premium" ? "Premium" : "Free",
-      icon: Crown,
-      color:
-        tenant?.plan === "premium"
-          ? "bg-amber-100 text-amber-700"
-          : "bg-slate-100 text-slate-700",
-    },
   ];
 
   const getGoogleMapsUrl = (latitude: number, longitude: number) =>
@@ -115,7 +139,7 @@ export function AdminDashboard() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -152,6 +176,131 @@ export function AdminDashboard() {
           </div>
         </Card>
       ) : null}
+
+      <div className="grid gap-6 xl:grid-cols-3">
+        <Card className="rounded-xl p-6 xl:col-span-2">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Collection Analytics</h2>
+              <p className="mt-1 text-sm text-gray-600">
+                Six-month collected installment trend for this tenant.
+              </p>
+            </div>
+            <div className="rounded-full bg-green-50 p-3 text-green-700">
+              <BarChart3 size={20} />
+            </div>
+          </div>
+          <div className="mt-6">
+            <ChartContainer config={collectionChartConfig} className="h-[260px] w-full">
+              <LineChart data={analytics.collectionTrend}>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                <YAxis hide />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartLegend content={<ChartLegendContent />} />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  name="Collected"
+                  stroke="var(--color-value)"
+                  strokeWidth={3}
+                  dot={{ r: 4 }}
+                />
+              </LineChart>
+            </ChartContainer>
+          </div>
+        </Card>
+
+        <Card className="rounded-xl p-6">
+          <h2 className="text-xl font-bold text-gray-900">Performance Summary</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Key ratios from scheduled installments due to date.
+          </p>
+          <div className="mt-5 space-y-3">
+            <div className="rounded-xl bg-green-50 px-4 py-3">
+              <p className="text-xs text-green-700">Collection Coverage</p>
+              <p className="mt-1 text-2xl font-bold text-green-800">
+                {analytics.collectionCoverageRate.toFixed(1)}%
+              </p>
+            </div>
+            <div className="rounded-xl bg-red-50 px-4 py-3">
+              <p className="text-xs text-red-600">Delinquency Rate</p>
+              <p className="mt-1 text-2xl font-bold text-red-700">
+                {analytics.delinquencyRate.toFixed(1)}%
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl bg-gray-50 px-4 py-3">
+                <p className="text-xs text-gray-500">Avg. Days Late</p>
+                <p className="mt-1 text-lg font-bold text-gray-900">
+                  {analytics.averageDaysLate.toFixed(1)}
+                </p>
+              </div>
+              <div className="rounded-xl bg-blue-50 px-4 py-3">
+                <p className="text-xs text-blue-700">30-Day Forecast</p>
+                <p className="mt-1 text-lg font-bold text-blue-800">
+                  {formatPhpCurrency(analytics.thirtyDayForecast)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-3">
+        <Card className="rounded-xl p-6 xl:col-span-2">
+          <h2 className="text-xl font-bold text-gray-900">Upcoming Due Pipeline</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Scheduled unpaid installments across the next four months.
+          </p>
+          <div className="mt-6">
+            <ChartContainer config={duePipelineChartConfig} className="h-[240px] w-full">
+              <BarChart data={analytics.duePipeline}>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                <YAxis hide />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartLegend content={<ChartLegendContent />} />
+                <Bar
+                  dataKey="value"
+                  name="Due"
+                  fill="var(--color-value)"
+                  radius={[8, 8, 0, 0]}
+                />
+              </BarChart>
+            </ChartContainer>
+          </div>
+        </Card>
+
+        <Card className="rounded-xl p-6">
+          <h2 className="text-xl font-bold text-gray-900">Risk Summary</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Borrower segmentation based on due and overdue exposure.
+          </p>
+          <div className="mt-5 space-y-4">
+            {analytics.riskSegments.map((entry) => (
+              <div key={entry.label}>
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium text-gray-700">{entry.label}</span>
+                  <span className="font-semibold text-gray-900">{entry.value}</span>
+                </div>
+                <div className="h-2 rounded-full bg-gray-100">
+                  <div
+                    className={`h-2 rounded-full ${
+                      entry.label === "High Risk"
+                        ? "bg-red-500"
+                        : entry.label === "Medium Risk"
+                          ? "bg-amber-500"
+                          : "bg-green-500"
+                    }`}
+                    style={{ width: `${(entry.value / maxRiskSegment) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
 
       <div className="grid gap-6 xl:grid-cols-3">
         <Card className="rounded-xl p-6 xl:col-span-2">

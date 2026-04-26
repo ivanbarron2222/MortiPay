@@ -33,6 +33,13 @@ export type PlanRequestSummary = {
   tenant: Pick<TenantSummary, "slug" | "name" | "plan" | "status"> | null;
 };
 
+export type TenantUserCount = {
+  tenantId: string;
+  totalUsers: number;
+  tenantUsers: number;
+  tenantAdmins: number;
+};
+
 type TenantRow = {
   id: string;
   slug: string;
@@ -64,6 +71,11 @@ type PlanRequestRow = {
     plan: TenantPlan;
     status: TenantStatus;
   } | null;
+};
+
+type TenantUserCountRow = {
+  tenant_id: string;
+  role: "tenant_admin" | "tenant_user";
 };
 
 function mapTenant(row: TenantRow): TenantSummary {
@@ -139,6 +151,34 @@ export async function getPlanRequestSummaries(): Promise<PlanRequestSummary[]> {
   }
 
   return (data ?? []).map((row) => mapPlanRequest(row as PlanRequestRow));
+}
+
+export async function getTenantUserCounts(): Promise<Record<string, TenantUserCount>> {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { data, error } = await supabase.from("app_users").select("tenant_id, role");
+
+  if (error) {
+    throw new Error(`Unable to fetch tenant user counts. ${error.message}`);
+  }
+
+  return ((data ?? []) as TenantUserCountRow[]).reduce<
+    Record<string, TenantUserCount>
+  >((counts, row) => {
+    const current =
+      counts[row.tenant_id] ??
+      {
+        tenantId: row.tenant_id,
+        totalUsers: 0,
+        tenantUsers: 0,
+        tenantAdmins: 0,
+      };
+
+    current.totalUsers += 1;
+    if (row.role === "tenant_user") current.tenantUsers += 1;
+    if (row.role === "tenant_admin") current.tenantAdmins += 1;
+    counts[row.tenant_id] = current;
+    return counts;
+  }, {});
 }
 
 export async function getCurrentTenantSummary(): Promise<TenantSummary | null> {
