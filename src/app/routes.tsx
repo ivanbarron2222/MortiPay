@@ -1,11 +1,11 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, type RouteObject } from "react-router";
 import { NotFound } from "./components/NotFound";
 import { RoleGate } from "./components/auth/RoleGate";
 import { TenantAccessGate } from "./components/auth/TenantAccessGate";
 
 const userAppOnly = import.meta.env.VITE_USER_APP_ONLY === "true";
 
-const routes = [
+const routes: RouteObject[] = [
   {
     path: "/",
     lazy: async () => ({
@@ -22,13 +22,6 @@ const routes = [
     path: "/accept-invite/:token",
     lazy: async () => ({
       Component: (await import("./components/user/AcceptInvite")).AcceptInvite,
-    }),
-  },
-  {
-    path: "/activate-account",
-    lazy: async () => ({
-      Component: (await import("./components/user/ActivateLegacyAccount"))
-        .ActivateLegacyAccount,
     }),
   },
   {

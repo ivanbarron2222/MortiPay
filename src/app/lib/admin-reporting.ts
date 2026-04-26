@@ -139,8 +139,8 @@ export function getAdminReportAnalytics(
   let mediumRiskCount = 0;
   let highRiskCount = 0;
 
-  const watchlist = withLoans
-    .map((user) => {
+  const watchlist: ReportWatchlistEntry[] = withLoans
+    .map<ReportWatchlistEntry | null>((user) => {
       if (!user.loanProfile) return null;
 
       const schedule = buildInstallmentSchedule(user.loanProfile);
@@ -239,7 +239,7 @@ export function getAdminReportAnalytics(
         nextDue: unpaidInstallments[0] ?? null,
       };
     })
-    .filter((entry): entry is ReportWatchlistEntry => Boolean(entry))
+    .filter((entry): entry is ReportWatchlistEntry => entry !== null)
     .sort((left, right) => {
       if (right.overdueInstallmentCount !== left.overdueInstallmentCount) {
         return right.overdueInstallmentCount - left.overdueInstallmentCount;

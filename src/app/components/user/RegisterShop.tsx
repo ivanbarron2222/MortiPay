@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router";
-import { Eye, EyeOff, Store, ChevronLeft } from "lucide-react";
+import { Eye, EyeOff, Mail, Store, ChevronLeft } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { registerShop } from "../../lib/demo-users";
+import { completePendingShopRegistration, registerShop } from "../../lib/demo-users";
 
 function toSlugPreview(name: string): string {
     return name
@@ -26,13 +26,43 @@ export function RegisterShop() {
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
     const [error, setError] = useState("");
+    const [info, setInfo] = useState("");
     const [loading, setLoading] = useState(false);
 
     const slugPreview = toSlugPreview(shopName);
 
+    useEffect(() => {
+        if (!window.location.search.includes("mode=complete")) return;
+
+        let active = true;
+        const finalize = async () => {
+            setLoading(true);
+            setError("");
+            setInfo("Finishing your shop registration...");
+
+            const result = await completePendingShopRegistration();
+            if (!active) return;
+
+            setLoading(false);
+            if (result.error || !result.user) {
+                setInfo("");
+                setError(result.error ?? "Unable to finish shop registration.");
+                return;
+            }
+
+            navigate("/admin", { replace: true });
+        };
+
+        void finalize();
+        return () => {
+            active = false;
+        };
+    }, [navigate]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError("");
+        setInfo("");
 
         if (!slugPreview) {
             setError("Shop name is invalid. Use letters, numbers, or hyphens.");
@@ -64,6 +94,13 @@ export function RegisterShop() {
                 return;
             }
 
+            if (result.pendingEmailConfirmation) {
+                setInfo(
+                    "Check your email and open the confirmation link to finish creating your shop.",
+                );
+                return;
+            }
+
             navigate("/admin");
         } catch (err) {
             const message = err instanceof Error ? err.message : "Unknown error";
@@ -76,7 +113,6 @@ export function RegisterShop() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-blue-600 to-blue-800 flex items-center justify-center p-4">
             <div className="w-full max-w-[420px] bg-white rounded-3xl p-8 shadow-2xl">
-                {/* Header */}
                 <div className="text-center mb-6">
                     <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
                         <Store className="w-8 h-8 text-white" />
@@ -88,7 +124,6 @@ export function RegisterShop() {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Shop Name */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                             Shop Name
@@ -111,7 +146,6 @@ export function RegisterShop() {
                         )}
                     </div>
 
-                    {/* Owner Full Name */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                             Owner Full Name
@@ -126,7 +160,6 @@ export function RegisterShop() {
                         />
                     </div>
 
-                    {/* Phone */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                             Phone Number
@@ -141,7 +174,6 @@ export function RegisterShop() {
                         />
                     </div>
 
-                    {/* Email */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                             Email Address
@@ -156,7 +188,6 @@ export function RegisterShop() {
                         />
                     </div>
 
-                    {/* Password */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                             Password
@@ -180,7 +211,6 @@ export function RegisterShop() {
                         </div>
                     </div>
 
-                    {/* Confirm Password */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                             Confirm Password
@@ -207,6 +237,13 @@ export function RegisterShop() {
                     {error && (
                         <p className="text-sm text-red-600 text-center bg-red-50 rounded-xl px-3 py-2">
                             {error}
+                        </p>
+                    )}
+
+                    {info && (
+                        <p className="text-sm text-blue-700 text-center bg-blue-50 rounded-xl px-3 py-2 flex items-center justify-center gap-2">
+                            <Mail size={16} />
+                            {info}
                         </p>
                     )}
 

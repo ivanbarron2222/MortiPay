@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { Eye, EyeOff, Store } from "lucide-react";
 import { Button } from "../ui/button";
@@ -6,7 +6,7 @@ import { Input } from "../ui/input";
 import {
   authenticateDemoUser,
   getDemoApiBaseUrl,
-  logoutDemoUser,
+  getCurrentDemoUser,
   updateCurrentDemoUserLocation,
 } from "../../lib/demo-users";
 import { ensureLocationAccess } from "../../lib/location-monitoring";
@@ -15,24 +15,34 @@ import { isSupabaseEnabled } from "../../lib/supabase";
 export function Login() {
   const navigate = useNavigate();
   const userAppOnly = import.meta.env.VITE_USER_APP_ONLY === "true";
-  const [showPassword, setShowPassword] = useState(false);
   const [shopCode, setShopCode] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const apiBaseUrl = getDemoApiBaseUrl();
   const supabaseEnabled = isSupabaseEnabled();
 
+  useEffect(() => {
+    void getCurrentDemoUser().then((user) => {
+      if (!user) return;
+      if (!userAppOnly && user.role === "super_admin") {
+        navigate("/super-admin", { replace: true });
+        return;
+      }
+      navigate(!userAppOnly && user.role === "tenant_admin" ? "/admin" : "/user", {
+        replace: true,
+      });
+    });
+  }, [navigate, userAppOnly]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError("");
     try {
-      const authenticated = await authenticateDemoUser(
-        identifier,
-        password,
-        shopCode,
-      );
+      const authenticated = await authenticateDemoUser(identifier, password, shopCode);
       if (!authenticated) {
         setError(
           supabaseEnabled
@@ -50,7 +60,6 @@ export function Login() {
             permissionState: locationCheck.off.permissionState,
             lastError: locationCheck.off.reason,
           });
-          logoutDemoUser();
           setError(
             "Location access is required. Please enable GPS permission and login again.",
           );
@@ -166,12 +175,6 @@ export function Login() {
             </div>
           </div>
 
-          <div className="text-right">
-            <a href="#" className="text-sm text-blue-600 hover:text-blue-700">
-              Forgot Password?
-            </a>
-          </div>
-
           <Button
             type="submit"
             disabled={loading}
@@ -195,13 +198,7 @@ export function Login() {
           </p>
           {supabaseEnabled ? (
             <p className="text-gray-600 text-sm mt-2">
-              Using an older seeded account?{" "}
-              <Link
-                to={`/activate-account?email=${encodeURIComponent(identifier)}&shop=${encodeURIComponent(shopCode)}`}
-                className="text-blue-600 hover:text-blue-700 font-medium"
-              >
-                Activate existing account
-              </Link>
+              Existing accounts can continue using email, password, and shop code.
             </p>
           ) : null}
         </div>

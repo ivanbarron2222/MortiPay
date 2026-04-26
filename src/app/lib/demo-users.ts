@@ -142,6 +142,14 @@ type DbLegacyActivationRow = {
   display_name: string;
 };
 
+type PendingShopRegistration = {
+  shopName: string;
+  ownerFullName: string;
+  email: string;
+  phone: string;
+  password?: string;
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
 const SUPABASE_USERS_TABLE = "app_users";
 const SUPABASE_TENANTS_TABLE = "tenants";
@@ -150,6 +158,7 @@ const SUPABASE_INVITES_TABLE = "tenant_user_invites";
 const SESSION_USER_ID_KEY = "mf_demo_session_user_id";
 const SESSION_USER_ROLE_KEY = "mf_demo_session_user_role";
 const PENDING_INVITE_TOKEN_KEY = "mf_pending_invite_token";
+const PENDING_SHOP_REGISTRATION_KEY = "mf_pending_shop_registration";
 let supabaseTenantIdCache: string | null = null;
 
 export function clearSupabaseTenantCache() {
@@ -337,12 +346,69 @@ function mapLegacyActivationRow(
   };
 }
 
+function getAppOrigin() {
+  if (typeof window === "undefined") return undefined;
+  return window.location.origin;
+}
+
+function normalizePendingShopRegistration(
+  payload: Partial<PendingShopRegistration> | null | undefined,
+): PendingShopRegistration | null {
+  if (!payload) return null;
+
+  const shopName = payload.shopName?.trim() ?? "";
+  const ownerFullName = payload.ownerFullName?.trim() ?? "";
+  const email = payload.email?.trim().toLowerCase() ?? "";
+  const phone = payload.phone?.trim() ?? "";
+  const password = payload.password?.trim() ?? "";
+
+  if (!shopName || !ownerFullName || !email || !phone) {
+    return null;
+  }
+
+  return {
+    shopName,
+    ownerFullName,
+    email,
+    phone,
+    password: password || undefined,
+  };
+}
+
+async function sendSupabaseEmailLink(params: {
+  email: string;
+  redirectTo?: string;
+  shouldCreateUser?: boolean;
+}) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+
+  const { error } = await supabase.auth.signInWithOtp({
+    email: params.email.trim().toLowerCase(),
+    options: {
+      shouldCreateUser: params.shouldCreateUser ?? true,
+      emailRedirectTo: params.redirectTo,
+    },
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
 async function getAuthenticatedSupabaseUserId() {
   if (!supabase) return null;
   const {
     data: { user },
   } = await supabase.auth.getUser();
   return user?.id ?? null;
+}
+
+async function getAuthenticatedSupabaseEmail() {
+  if (!supabase) return null;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user?.email?.trim().toLowerCase() ?? null;
 }
 
 async function ensureSupabaseSessionAfterSignUp(params: {
@@ -561,11 +627,19 @@ async function supabaseActivateLegacyAccount(params: {
     throw new Error(`Could not create auth account: ${authError.message}`);
   }
 
-  const authUserId =
-    authResult.user?.id ?? (await ensureSupabaseSessionAfterSignUp({
+  let authUserId: string;
+  try {
+    authUserId = await ensureSupabaseSessionAfterSignUp({
       email: normalizedEmail,
       password: params.password,
-    }));
+    });
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Auth account created, but email confirmation is still required.",
+    );
+  }
 
   const { error: activationError } = await supabase.rpc("activate_legacy_account", {
     shop_slug: params.shopSlug.trim() ? normalizedShopSlug : null,
@@ -723,6 +797,50 @@ async function resolveSupabaseAuthenticatedAccount(): Promise<DemoUserAccount | 
   return account;
 }
 
+async function autoActivateLegacyAccountIfPossible(): Promise<boolean> {
+  if (!supabase) return false;
+
+  const authUserId = await getAuthenticatedSupabaseUserId();
+  if (!authUserId) return false;
+
+  const existingAccount = await resolveSupabaseAuthenticatedAccount();
+  if (existingAccount) return false;
+
+  const email = await getAuthenticatedSupabaseEmail();
+  if (!email) return false;
+
+  const activeTenantSlug = getActiveTenantSlug().trim();
+  if (activeTenantSlug) {
+    const tenantLookup = await supabaseLookupLegacyAccountForActivation({
+      email,
+      shopSlug: activeTenantSlug,
+    }).catch(() => null);
+
+    if (tenantLookup) {
+      const { error } = await supabase.rpc("activate_legacy_account", {
+        shop_slug: normalizeTenantSlug(activeTenantSlug),
+      });
+      return !error;
+    }
+  }
+
+  const platformLookup = await supabaseLookupLegacyAccountForActivation({
+    email,
+    shopSlug: "",
+  }).catch(() => null);
+
+  if (platformLookup?.role === "super_admin") {
+    clearActiveTenantSlug();
+    clearSupabaseTenantCache();
+    const { error } = await supabase.rpc("activate_legacy_account", {
+      shop_slug: null,
+    });
+    return !error;
+  }
+
+  return false;
+}
+
 async function finalizePendingInviteIfPossible(): Promise<void> {
   if (!supabase) return;
   const pendingToken = getPendingInviteToken();
@@ -745,6 +863,60 @@ async function finalizePendingInviteIfPossible(): Promise<void> {
   if (!error) {
     clearPendingInviteToken();
   }
+}
+
+function setPendingShopRegistration(payload: PendingShopRegistration) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(PENDING_SHOP_REGISTRATION_KEY, JSON.stringify(payload));
+}
+
+function getPendingShopRegistration(): PendingShopRegistration | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(PENDING_SHOP_REGISTRATION_KEY);
+  if (!raw) return null;
+
+  try {
+    return normalizePendingShopRegistration(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingShopRegistration() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(PENDING_SHOP_REGISTRATION_KEY);
+}
+
+async function getPendingShopRegistrationFromAuthMetadata() {
+  if (!supabase) return null;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  return normalizePendingShopRegistration(
+    (user?.user_metadata?.pending_shop_registration as Partial<PendingShopRegistration> | undefined) ??
+      null,
+  );
+}
+
+async function clearPendingShopRegistrationFromAuthMetadata() {
+  if (!supabase) return;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return;
+
+  const nextMetadata = {
+    ...(user.user_metadata ?? {}),
+  } as Record<string, unknown>;
+  delete nextMetadata.pending_shop_registration;
+
+  await supabase.auth.updateUser({
+    data: nextMetadata,
+  });
 }
 
 async function apiPatchUser(
@@ -887,7 +1059,13 @@ export async function activateLegacyAccount(params: {
 export async function getCurrentDemoUser(): Promise<DemoUserAccount | null> {
   if (isSupabaseEnabled()) {
     await finalizePendingInviteIfPossible();
-    const authenticated = await resolveSupabaseAuthenticatedAccount();
+    let authenticated = await resolveSupabaseAuthenticatedAccount();
+    if (!authenticated) {
+      const autoActivated = await autoActivateLegacyAccountIfPossible();
+      if (autoActivated) {
+        authenticated = await resolveSupabaseAuthenticatedAccount();
+      }
+    }
     if (authenticated) {
       setCurrentDemoUserId(authenticated.id);
       setCurrentDemoUserRole(authenticated.role);
@@ -1064,28 +1242,68 @@ export async function registerShop(params: {
   email: string;
   phone: string;
   password: string;
-}): Promise<{ user: DemoUserAccount | null; error: string | null }> {
-  if (!supabase) return { user: null, error: "Supabase is not configured." };
+}): Promise<{
+  user: DemoUserAccount | null;
+  error: string | null;
+  pendingEmailConfirmation: boolean;
+}> {
+  if (!supabase) {
+    return { user: null, error: "Supabase is not configured.", pendingEmailConfirmation: false };
+  }
 
   const slug = normalizeTenantSlug(params.shopName);
-  if (!slug) return { user: null, error: "Shop name is invalid." };
+  if (!slug) {
+    return { user: null, error: "Shop name is invalid.", pendingEmailConfirmation: false };
+  }
   const normalizedEmail = params.email.trim().toLowerCase();
+
+  setPendingShopRegistration({
+    shopName: params.shopName.trim(),
+    ownerFullName: params.ownerFullName.trim(),
+    email: normalizedEmail,
+    phone: params.phone.trim(),
+    password: params.password,
+  });
 
   const { data: authResult, error: authError } = await supabase.auth.signUp({
     email: normalizedEmail,
     password: params.password,
+    options: {
+      emailRedirectTo: `${getAppOrigin() ?? ""}/register-shop?mode=complete`,
+      data: {
+        pending_shop_registration: {
+          shopName: params.shopName.trim(),
+          ownerFullName: params.ownerFullName.trim(),
+          email: normalizedEmail,
+          phone: params.phone.trim(),
+          password: params.password,
+        },
+      },
+    },
   });
   if (authError) {
-    return { user: null, error: `Could not create auth account: ${authError.message}` };
+    clearPendingShopRegistration();
+    return {
+      user: null,
+      error: `Could not create auth account: ${authError.message}`,
+      pendingEmailConfirmation: false,
+    };
   }
 
-  const authUserId =
-    authResult.user?.id ?? (await ensureSupabaseSessionAfterSignUp({
+  let authUserId: string;
+  try {
+    authUserId = await ensureSupabaseSessionAfterSignUp({
       email: normalizedEmail,
       password: params.password,
-    }));
+    });
+  } catch (error) {
+    return {
+      user: null,
+      error: null,
+      pendingEmailConfirmation: true,
+    };
+  }
 
-  // Create tenant
   const { data: tenant, error: tenantError } = await supabase
     .from(SUPABASE_TENANTS_TABLE)
     .insert({ slug, name: tenantSlugToName(slug), owner_email: normalizedEmail })
@@ -1093,16 +1311,16 @@ export async function registerShop(params: {
     .single();
   if (tenantError) {
     await supabase.auth.signOut();
+    clearPendingShopRegistration();
     const message =
       tenantError.message.includes("tenants_slug_key")
         ? `Shop code "${slug}" is already taken. Try a different shop name.`
         : tenantError.message.includes("tenants_owner_email_idx")
           ? "An account with this email already exists."
           : `Could not create shop: ${tenantError.message}`;
-    return { user: null, error: message };
+    return { user: null, error: message, pendingEmailConfirmation: false };
   }
 
-  // Create first admin user
   const adminUser: DemoUserAccount = {
     id: "ADM-001",
     fullName: params.ownerFullName.trim(),
@@ -1122,18 +1340,22 @@ export async function registerShop(params: {
     .single();
 
   if (userError) {
-    // Roll back tenant on failure
     await supabase.from(SUPABASE_TENANTS_TABLE).delete().eq("id", tenant.id);
-    return { user: null, error: `Could not create admin account: ${userError.message}` };
+    clearPendingShopRegistration();
+    return {
+      user: null,
+      error: `Could not create admin account: ${userError.message}`,
+      pendingEmailConfirmation: false,
+    };
   }
 
-  // Set session
   setActiveTenantSlug(slug);
   clearSupabaseTenantCache();
+  clearPendingShopRegistration();
   const created = fromDbRow(insertedUser as DbUserRow);
   setCurrentDemoUserId(created.id);
   setCurrentDemoUserRole(created.role);
-  return { user: created, error: null };
+  return { user: created, error: null, pendingEmailConfirmation: false };
 }
 
 export async function registerDemoUser(params: {
@@ -1176,11 +1398,10 @@ export async function registerDemoUser(params: {
     if (authError) {
       return { user: null, error: `Could not create auth account: ${authError.message}` };
     }
-    user.authUserId =
-      authResult.user?.id ?? (await ensureSupabaseSessionAfterSignUp({
-        email: normalizedEmail,
-        password: params.password,
-      }));
+    user.authUserId = await ensureSupabaseSessionAfterSignUp({
+      email: normalizedEmail,
+      password: params.password,
+    });
   }
 
   const created = await storePostUser(user);
@@ -1318,12 +1539,10 @@ export async function acceptTenantUserInvite(params: {
     return { user: null, error: `Could not create auth account: ${authError.message}` };
   }
 
-  const authUserId =
-    authResult.user?.id ??
-    (await ensureSupabaseSessionAfterSignUp({
-      email: invite.email,
-      password: params.password,
-    }).catch(() => null));
+  const authUserId = await ensureSupabaseSessionAfterSignUp({
+    email: invite.email,
+    password: params.password,
+  }).catch(() => null);
 
   if (!authUserId) {
     setPendingInviteToken(invite.token);
@@ -1348,6 +1567,123 @@ export async function acceptTenantUserInvite(params: {
   const created = fromDbRow(createdRow as DbUserRow);
   clearPendingInviteToken();
 
+  setCurrentDemoUserId(created.id);
+  setCurrentDemoUserRole(created.role);
+  return { user: created, error: null };
+}
+
+export async function requestPasswordlessLogin(params: {
+  email: string;
+  shopSlug: string;
+}) {
+  if (!supabase) {
+    return { error: "Supabase is not configured." };
+  }
+
+  const normalizedEmail = params.email.trim().toLowerCase();
+  const rawShopSlug = params.shopSlug.trim();
+
+  if (!normalizedEmail.includes("@")) {
+    return { error: "Enter a valid email address." };
+  }
+
+  if (rawShopSlug) {
+    setActiveTenantSlug(normalizeTenantSlug(rawShopSlug));
+    clearSupabaseTenantCache();
+  } else {
+    clearActiveTenantSlug();
+    clearSupabaseTenantCache();
+  }
+
+  try {
+    const query = rawShopSlug
+      ? `?shop=${encodeURIComponent(normalizeTenantSlug(rawShopSlug))}`
+      : "";
+    await sendSupabaseEmailLink({
+      email: normalizedEmail,
+      shouldCreateUser: true,
+      redirectTo: `${getAppOrigin() ?? ""}/${query}`,
+    });
+    return { error: null };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Unable to send login link.",
+    };
+  }
+}
+
+export async function completePendingShopRegistration() {
+  if (!supabase) {
+    return { user: null, error: "Supabase is not configured." };
+  }
+
+  const pending = getPendingShopRegistration() ?? (await getPendingShopRegistrationFromAuthMetadata());
+  if (!pending) {
+    return { user: null, error: "No pending shop registration was found." };
+  }
+
+  const normalizedEmail = pending.email.trim().toLowerCase();
+  const slug = normalizeTenantSlug(pending.shopName);
+  const authUserId = await getAuthenticatedSupabaseUserId();
+
+  if (!authUserId) {
+    return { user: null, error: "Open the email link first to continue registration." };
+  }
+
+  const existingAccount = await resolveSupabaseAuthenticatedAccount();
+  if (existingAccount) {
+    clearPendingShopRegistration();
+    await clearPendingShopRegistrationFromAuthMetadata();
+    setCurrentDemoUserId(existingAccount.id);
+    setCurrentDemoUserRole(existingAccount.role);
+    return { user: existingAccount, error: null };
+  }
+
+  const { data: tenant, error: tenantError } = await supabase
+    .from(SUPABASE_TENANTS_TABLE)
+    .insert({ slug, name: tenantSlugToName(slug), owner_email: normalizedEmail })
+    .select("id")
+    .single();
+
+  if (tenantError) {
+    const message =
+      tenantError.message.includes("tenants_slug_key")
+        ? `Shop code "${slug}" is already taken. Try a different shop name.`
+        : tenantError.message.includes("tenants_owner_email_idx")
+          ? "An account with this email already exists."
+          : `Could not create shop: ${tenantError.message}`;
+    return { user: null, error: message };
+  }
+
+  const adminUser: DemoUserAccount = {
+    id: "ADM-001",
+    fullName: pending.ownerFullName.trim(),
+    email: normalizedEmail,
+    phone: pending.phone.trim(),
+    authUserId,
+    password: "",
+    role: "tenant_admin",
+    createdAt: new Date().toISOString(),
+    locationTracking: getDefaultLocationTracking(),
+  };
+
+  const { data: insertedUser, error: userError } = await supabase
+    .from(SUPABASE_USERS_TABLE)
+    .insert(toDbInsert(adminUser, tenant.id as string))
+    .select("*")
+    .single();
+
+  if (userError) {
+    await supabase.from(SUPABASE_TENANTS_TABLE).delete().eq("id", tenant.id);
+    return { user: null, error: `Could not create admin account: ${userError.message}` };
+  }
+
+  setActiveTenantSlug(slug);
+  clearSupabaseTenantCache();
+  clearPendingShopRegistration();
+  await clearPendingShopRegistrationFromAuthMetadata();
+
+  const created = fromDbRow(insertedUser as DbUserRow);
   setCurrentDemoUserId(created.id);
   setCurrentDemoUserRole(created.role);
   return { user: created, error: null };

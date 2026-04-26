@@ -97,7 +97,7 @@ export function AdminUsers() {
     setError("");
     setSuccess(
       isSupabaseEnabled()
-        ? "Invite created. Share the activation link below with the tenant user."
+        ? "Invite created. Share the secure login link below with the tenant user."
         : "User account created.",
     );
     setForm({
@@ -131,7 +131,7 @@ export function AdminUsers() {
         <h1 className="text-3xl font-bold text-gray-900 mb-2">User Accounts</h1>
         <p className="text-gray-600">
           {isSupabaseEnabled()
-            ? "Invite tenant users, then let them activate their own account securely."
+            ? "Invite tenant users, then let them sign in through their email link."
             : "Create user credentials and loan profile. Installments are auto-calculated."}
         </p>
       </div>
@@ -142,8 +142,8 @@ export function AdminUsers() {
         </h2>
         {isSupabaseEnabled() ? (
           <p className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-            The tenant user will receive an invite link, set their own password, and then get a
-            real authenticated account tied to this tenant.
+            The tenant user opens the invite, receives an email link from Supabase Auth, and the
+            tenant loan account is completed after sign-in.
           </p>
         ) : null}
         <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -246,7 +246,7 @@ export function AdminUsers() {
                 <div className="mt-3 rounded-lg bg-gray-50 p-3">
                   <div className="flex items-center gap-2 text-xs font-semibold text-gray-700">
                     <Link2 size={14} />
-                    Activation Link
+                    Secure Invite Link
                   </div>
                   <p className="mt-2 break-all text-xs text-blue-700">
                     {getInviteUrl(invite.token)}
