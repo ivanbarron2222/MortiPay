@@ -8,6 +8,7 @@ type GateState =
   | { status: "loading" }
   | { status: "allowed" }
   | { status: "redirect" }
+  | { status: "error"; message: string }
   | {
       status: "blocked";
       tenantStatus: "pending" | "suspended" | "inactive";
@@ -20,31 +21,42 @@ export function TenantAccessGate() {
   useEffect(() => {
     let active = true;
     const load = async () => {
-      const currentUser = await getCurrentDemoUser();
-      if (!active) return;
+      try {
+        const currentUser = await getCurrentDemoUser();
+        if (!active) return;
 
-      if (!currentUser || currentUser.role === "super_admin") {
-        setState({ status: "redirect" });
-        return;
+        if (!currentUser || currentUser.role === "super_admin") {
+          setState({ status: "redirect" });
+          return;
+        }
+
+        const tenant = await getCurrentTenantSummary();
+        if (!active) return;
+
+        if (!tenant) {
+          setState({ status: "redirect" });
+          return;
+        }
+
+        if (tenant.status === "active") {
+          setState({ status: "allowed" });
+          return;
+        }
+
+        setState({
+          status: "blocked",
+          tenantStatus: tenant.status,
+        });
+      } catch (error) {
+        if (!active) return;
+        setState({
+          status: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Unable to verify tenant access.",
+        });
       }
-
-      const tenant = await getCurrentTenantSummary();
-      if (!active) return;
-
-      if (!tenant) {
-        setState({ status: "redirect" });
-        return;
-      }
-
-      if (tenant.status === "active") {
-        setState({ status: "allowed" });
-        return;
-      }
-
-      setState({
-        status: "blocked",
-        tenantStatus: tenant.status,
-      });
     };
     void load();
     return () => {
@@ -66,6 +78,31 @@ export function TenantAccessGate() {
 
   if (state.status === "allowed") {
     return <Outlet />;
+  }
+
+  if (state.status === "error") {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center px-4">
+        <Card className="max-w-xl rounded-3xl p-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+            Tenant Check Failed
+          </p>
+          <h1 className="mt-3 text-2xl font-bold text-slate-950">
+            Access could not be verified
+          </h1>
+          <p className="mt-3 text-sm text-slate-600">{state.message}</p>
+          <button
+            onClick={() => {
+              logoutDemoUser();
+              navigate("/");
+            }}
+            className="mt-6 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Back to Login
+          </button>
+        </Card>
+      </div>
+    );
   }
 
   const message =

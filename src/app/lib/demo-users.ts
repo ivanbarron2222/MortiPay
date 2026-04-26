@@ -147,7 +147,6 @@ type PendingShopRegistration = {
   ownerFullName: string;
   email: string;
   phone: string;
-  password?: string;
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
@@ -360,8 +359,6 @@ function normalizePendingShopRegistration(
   const ownerFullName = payload.ownerFullName?.trim() ?? "";
   const email = payload.email?.trim().toLowerCase() ?? "";
   const phone = payload.phone?.trim() ?? "";
-  const password = payload.password?.trim() ?? "";
-
   if (!shopName || !ownerFullName || !email || !phone) {
     return null;
   }
@@ -371,7 +368,6 @@ function normalizePendingShopRegistration(
     ownerFullName,
     email,
     phone,
-    password: password || undefined,
   };
 }
 
@@ -416,12 +412,17 @@ async function ensureSupabaseSessionAfterSignUp(params: {
   password: string;
 }) {
   if (!supabase) throw new Error("Supabase is not configured.");
+  const normalizedEmail = params.email.trim().toLowerCase();
 
+  const currentAuthEmail = await getAuthenticatedSupabaseEmail();
   const authUserId = await getAuthenticatedSupabaseUserId();
-  if (authUserId) return authUserId;
+  if (authUserId && currentAuthEmail === normalizedEmail) return authUserId;
+  if (authUserId) {
+    await supabase.auth.signOut();
+  }
 
   const signInResult = await supabase.auth.signInWithPassword({
-    email: params.email,
+    email: normalizedEmail,
     password: params.password,
   });
 
@@ -439,6 +440,77 @@ async function ensureSupabaseSessionAfterSignUp(params: {
   }
 
   return nextAuthUserId;
+}
+
+function getSupabaseAuthErrorMessage(error: unknown) {
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message ?? "");
+  }
+  return "";
+}
+
+function isSupabaseEmailRateLimitError(error: unknown) {
+  return getSupabaseAuthErrorMessage(error).toLowerCase().includes("rate limit");
+}
+
+function isExistingSupabaseAuthAccountError(error: unknown) {
+  const message = getSupabaseAuthErrorMessage(error).toLowerCase();
+  return message.includes("already registered") || message.includes("already exists");
+}
+
+async function createOrSignInSupabaseAuthAccount(params: {
+  email: string;
+  password: string;
+  options?: {
+    emailRedirectTo?: string;
+    data?: Record<string, unknown>;
+  };
+}) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+
+  const normalizedEmail = params.email.trim().toLowerCase();
+  const currentAuthEmail = await getAuthenticatedSupabaseEmail();
+  const currentAuthUserId = await getAuthenticatedSupabaseUserId();
+  if (currentAuthUserId && currentAuthEmail !== normalizedEmail) {
+    await supabase.auth.signOut();
+  }
+
+  const { error: signUpError } = await supabase.auth.signUp({
+    email: normalizedEmail,
+    password: params.password,
+    options: params.options,
+  });
+
+  if (signUpError) {
+    const signInResult = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password: params.password,
+    });
+
+    if (!signInResult.error) {
+      const authUserId = await getAuthenticatedSupabaseUserId();
+      if (authUserId) return authUserId;
+    }
+
+    if (isSupabaseEmailRateLimitError(signUpError)) {
+      throw new Error(
+        "Supabase email rate limit reached. If this account was already created, use the same password to log in. Otherwise wait a few minutes before trying again.",
+      );
+    }
+
+    if (isExistingSupabaseAuthAccountError(signUpError)) {
+      throw new Error(
+        "An auth account already exists for this email. Use the existing password to log in.",
+      );
+    }
+
+    throw new Error(`Could not create auth account: ${signUpError.message}`);
+  }
+
+  return ensureSupabaseSessionAfterSignUp({
+    email: normalizedEmail,
+    password: params.password,
+  });
 }
 
 async function ensureSupabaseTenantId(): Promise<string> {
@@ -619,17 +691,9 @@ async function supabaseActivateLegacyAccount(params: {
   const normalizedEmail = params.email.trim().toLowerCase();
   const normalizedShopSlug = normalizeTenantSlug(params.shopSlug);
 
-  const { data: authResult, error: authError } = await supabase.auth.signUp({
-    email: normalizedEmail,
-    password: params.password,
-  });
-  if (authError) {
-    throw new Error(`Could not create auth account: ${authError.message}`);
-  }
-
   let authUserId: string;
   try {
-    authUserId = await ensureSupabaseSessionAfterSignUp({
+    authUserId = await createOrSignInSupabaseAuthAccount({
       email: normalizedEmail,
       password: params.password,
     });
@@ -1212,6 +1276,12 @@ export async function authenticateDemoUser(
     return platformAdmin;
   }
 
+  if (isSupabaseEnabled()) {
+    clearActiveTenantSlug();
+    clearSupabaseTenantCache();
+    return null;
+  }
+
   // Set the tenant before fetching so ensureSupabaseTenantId uses the right slug
   setActiveTenantSlug(normalizedShopSlug);
   clearSupabaseTenantCache();
@@ -1262,41 +1332,39 @@ export async function registerShop(params: {
     ownerFullName: params.ownerFullName.trim(),
     email: normalizedEmail,
     phone: params.phone.trim(),
-    password: params.password,
   });
-
-  const { data: authResult, error: authError } = await supabase.auth.signUp({
-    email: normalizedEmail,
-    password: params.password,
-    options: {
-      emailRedirectTo: `${getAppOrigin() ?? ""}/register-shop?mode=complete`,
-      data: {
-        pending_shop_registration: {
-          shopName: params.shopName.trim(),
-          ownerFullName: params.ownerFullName.trim(),
-          email: normalizedEmail,
-          phone: params.phone.trim(),
-          password: params.password,
-        },
-      },
-    },
-  });
-  if (authError) {
-    clearPendingShopRegistration();
-    return {
-      user: null,
-      error: `Could not create auth account: ${authError.message}`,
-      pendingEmailConfirmation: false,
-    };
-  }
 
   let authUserId: string;
   try {
-    authUserId = await ensureSupabaseSessionAfterSignUp({
+    authUserId = await createOrSignInSupabaseAuthAccount({
       email: normalizedEmail,
       password: params.password,
+      options: {
+        emailRedirectTo: `${getAppOrigin() ?? ""}/register-shop?mode=complete`,
+        data: {
+          pending_shop_registration: {
+            shopName: params.shopName.trim(),
+            ownerFullName: params.ownerFullName.trim(),
+            email: normalizedEmail,
+            phone: params.phone.trim(),
+          },
+        },
+      },
     });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      !error.message.includes("Auth account created") &&
+      !error.message.includes("Auth account exists")
+    ) {
+      clearPendingShopRegistration();
+      return {
+        user: null,
+        error: error.message,
+        pendingEmailConfirmation: false,
+      };
+    }
+
     return {
       user: null,
       error: null,
@@ -1312,8 +1380,11 @@ export async function registerShop(params: {
   if (tenantError) {
     await supabase.auth.signOut();
     clearPendingShopRegistration();
+    const isPolicyError = tenantError.message.toLowerCase().includes("row-level security");
     const message =
-      tenantError.message.includes("tenants_slug_key")
+      isPolicyError
+        ? "Could not create shop because Supabase rejected the tenant insert. Confirm the email link first, then retry. If it still fails, re-run the latest supabase/schema.sql policies in Supabase."
+        : tenantError.message.includes("tenants_slug_key")
         ? `Shop code "${slug}" is already taken. Try a different shop name.`
         : tenantError.message.includes("tenants_owner_email_idx")
           ? "An account with this email already exists."
@@ -1327,7 +1398,7 @@ export async function registerShop(params: {
     email: normalizedEmail,
     phone: params.phone.trim(),
     authUserId,
-    password: params.password,
+    password: "",
     role: "tenant_admin",
     createdAt: new Date().toISOString(),
     locationTracking: getDefaultLocationTracking(),
@@ -1391,17 +1462,18 @@ export async function registerDemoUser(params: {
   };
 
   if (isSupabaseEnabled() && supabase) {
-    const { data: authResult, error: authError } = await supabase.auth.signUp({
-      email: normalizedEmail,
-      password: params.password,
-    });
-    if (authError) {
-      return { user: null, error: `Could not create auth account: ${authError.message}` };
+    try {
+      user.authUserId = await createOrSignInSupabaseAuthAccount({
+        email: normalizedEmail,
+        password: params.password,
+      });
+    } catch (error) {
+      return {
+        user: null,
+        error: error instanceof Error ? error.message : "Could not create auth account.",
+      };
     }
-    user.authUserId = await ensureSupabaseSessionAfterSignUp({
-      email: normalizedEmail,
-      password: params.password,
-    });
+    user.password = "";
   }
 
   const created = await storePostUser(user);
@@ -1531,18 +1603,26 @@ export async function acceptTenantUserInvite(params: {
   setActiveTenantSlug(tenantSlug);
   clearSupabaseTenantCache();
 
-  const { data: authResult, error: authError } = await supabase.auth.signUp({
-    email: invite.email,
-    password: params.password,
-  });
-  if (authError) {
-    return { user: null, error: `Could not create auth account: ${authError.message}` };
+  let authUserId: string | null;
+  try {
+    authUserId = await createOrSignInSupabaseAuthAccount({
+      email: invite.email,
+      password: params.password,
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes("Auth account created") ||
+        error.message.includes("Auth account exists"))
+    ) {
+      authUserId = null;
+    } else {
+      return {
+        user: null,
+        error: error instanceof Error ? error.message : "Could not create auth account.",
+      };
+    }
   }
-
-  const authUserId = await ensureSupabaseSessionAfterSignUp({
-    email: invite.email,
-    password: params.password,
-  }).catch(() => null);
 
   if (!authUserId) {
     setPendingInviteToken(invite.token);
@@ -1555,7 +1635,7 @@ export async function acceptTenantUserInvite(params: {
 
   const { data: createdRow, error: acceptError } = await supabase.rpc("accept_tenant_user_invite", {
     invite_token: invite.token,
-    invite_password: params.password,
+    invite_password: "",
   });
   if (acceptError) {
     return {
@@ -1646,8 +1726,11 @@ export async function completePendingShopRegistration() {
     .single();
 
   if (tenantError) {
+    const isPolicyError = tenantError.message.toLowerCase().includes("row-level security");
     const message =
-      tenantError.message.includes("tenants_slug_key")
+      isPolicyError
+        ? "Could not create shop because Supabase rejected the tenant insert. Confirm the email link first, then retry. If it still fails, re-run the latest supabase/schema.sql policies in Supabase."
+        : tenantError.message.includes("tenants_slug_key")
         ? `Shop code "${slug}" is already taken. Try a different shop name.`
         : tenantError.message.includes("tenants_owner_email_idx")
           ? "An account with this email already exists."
@@ -1720,17 +1803,29 @@ export async function changeCurrentDemoUserPassword(params: {
   const users = await getDemoUsers();
   const currentUser = users.find((user) => user.id === currentId);
   if (!currentUser) return { success: false, error: "User not found." };
-  if (currentUser.password !== params.currentPassword) {
-    return { success: false, error: "Current password is incorrect." };
-  }
 
   if (isSupabaseEnabled() && supabase) {
-    const { error } = await supabase.auth.updateUser({
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: currentUser.email,
+      password: params.currentPassword,
+    });
+    if (verifyError) {
+      return { success: false, error: "Current password is incorrect." };
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({
       password: params.newPassword,
     });
-    if (error) {
-      return { success: false, error: error.message };
+    if (updateError) {
+      return { success: false, error: updateError.message };
     }
+
+    await storePatchUser(currentId, { password: "" });
+    return { success: true, error: null };
+  }
+
+  if (currentUser.password !== params.currentPassword) {
+    return { success: false, error: "Current password is incorrect." };
   }
 
   await storePatchUser(currentId, { password: params.newPassword });

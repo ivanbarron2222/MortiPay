@@ -418,7 +418,7 @@ begin
     target_invite.email,
     target_invite.phone,
     auth.uid(),
-    invite_password,
+    '',
     'tenant_user',
     now(),
     jsonb_build_object(
