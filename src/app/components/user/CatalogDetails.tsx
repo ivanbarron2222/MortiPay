@@ -5,18 +5,19 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Input } from "../ui/input";
 import { ImageWithFallback } from "../figma/ImageWithFallback";
-import { motorcycleCatalog, type LoanTermMonths } from "../../data/motorcycles";
+import { type LoanTermMonths } from "../../data/motorcycles";
 import { estimateLoan, formatPhpCurrency, getDefaultLoanSetup } from "../../lib/financing";
 import {
   getFavoriteCatalogIds,
   pushRecentlyViewedCatalogId,
   toggleFavoriteCatalogId,
 } from "../../lib/catalog-storage";
+import { getTenantCatalogItem, type TenantCatalogItem } from "../../lib/tenant-config";
 
 export function CatalogDetails() {
   const navigate = useNavigate();
   const params = useParams();
-  const item = motorcycleCatalog.find((catalogItem) => catalogItem.id === params.id);
+  const [item, setItem] = useState<TenantCatalogItem | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
 
   const defaultLoan = useMemo(() => {
@@ -29,7 +30,8 @@ export function CatalogDetails() {
 
   useEffect(() => {
     setFavoriteIds(getFavoriteCatalogIds());
-  }, []);
+    setItem(params.id ? getTenantCatalogItem(params.id) : null);
+  }, [params.id]);
 
   useEffect(() => {
     if (!item) return;

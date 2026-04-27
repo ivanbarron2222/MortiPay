@@ -11,6 +11,15 @@ export const supabase =
     ? createClient(supabaseUrl, supabaseAnonKey)
     : null;
 
+export function getSupabaseFunctionUrl(functionName: string) {
+  if (!supabaseUrl) return null;
+  return `${supabaseUrl.replace(/\/+$/, "")}/functions/v1/${functionName}`;
+}
+
+export function getSupabaseAnonKey() {
+  return supabaseAnonKey || null;
+}
+
 export function isSupabaseEnabled() {
   return import.meta.env.VITE_USE_SUPABASE === "true" && Boolean(supabase);
 }

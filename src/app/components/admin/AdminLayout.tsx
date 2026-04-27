@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Settings,
   Sparkles,
   Users,
 } from "lucide-react";
@@ -45,6 +46,7 @@ export function AdminLayout() {
     { icon: FileText, label: "Loan Accounts", path: "/admin/loans" },
     { icon: Users, label: "User Accounts", path: "/admin/users" },
     { icon: BarChart3, label: "Reports", path: "/admin/reports" },
+    { icon: Settings, label: "Settings", path: "/admin/settings" },
   ];
 
   useEffect(() => {

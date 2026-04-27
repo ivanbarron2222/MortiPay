@@ -1,10 +1,13 @@
 import type { DemoLoanProfile, DemoUserAccount } from "./demo-users";
+import { calculateOverdueFee, getOverdueSettings } from "./tenant-config";
 
 export type ReportScheduleEntry = {
   installmentNumber: number;
   dueDate: Date;
   paid: boolean;
   amount: number;
+  overdueFee: number;
+  totalDue: number;
 };
 
 export type ReportWatchlistEntry = {
@@ -74,16 +77,26 @@ export function buildInstallmentSchedule(
 ): ReportScheduleEntry[] {
   const start = new Date(loanProfile.startDate);
   const paidInstallmentNumbers = loanProfile.paidInstallmentNumbers ?? [];
+  const overdueSettings = getOverdueSettings();
 
   return Array.from({ length: loanProfile.termMonths }).map((_, index) => {
     const installmentNumber = index + 1;
     const dueDate = new Date(start);
     dueDate.setMonth(start.getMonth() + index);
+    const paid = paidInstallmentNumbers.includes(installmentNumber);
+    const overdue = calculateOverdueFee({
+      dueDate,
+      amount: loanProfile.monthlyInstallment,
+      paid,
+      settings: overdueSettings,
+    });
     return {
       installmentNumber,
       dueDate,
-      paid: paidInstallmentNumbers.includes(installmentNumber),
+      paid,
       amount: loanProfile.monthlyInstallment,
+      overdueFee: overdue.overdueFee,
+      totalDue: overdue.totalDue,
     };
   });
 }
@@ -158,7 +171,7 @@ export function getAdminReportAnalytics(
         .filter((item) => item.dueDate >= monthStart && item.dueDate < nextMonthStart)
         .reduce((sum, item) => sum + item.amount, 0);
 
-      overdueAmount += overdueInstallments.reduce((sum, item) => sum + item.amount, 0);
+      overdueAmount += overdueInstallments.reduce((sum, item) => sum + item.totalDue, 0);
       dueThisWeekAmount += dueThisWeekInstallments.reduce((sum, item) => sum + item.amount, 0);
       totalOutstanding += unpaidInstallments.reduce((sum, item) => sum + item.amount, 0);
       installmentsDueToDate += dueToDateInstallments.length;
@@ -188,11 +201,11 @@ export function getAdminReportAnalytics(
         if (daysPastDue < 0) {
           currentBucketAmount += item.amount;
         } else if (daysPastDue <= 30) {
-          bucket1To30Amount += item.amount;
+          bucket1To30Amount += item.totalDue;
         } else if (daysPastDue <= 60) {
-          bucket31To60Amount += item.amount;
+          bucket31To60Amount += item.totalDue;
         } else {
-          bucket61PlusAmount += item.amount;
+          bucket61PlusAmount += item.totalDue;
         }
       });
 
@@ -234,7 +247,7 @@ export function getAdminReportAnalytics(
       return {
         user,
         overdueInstallmentCount: overdueInstallments.length,
-        overdueBalance: overdueInstallments.reduce((sum, item) => sum + item.amount, 0),
+        overdueBalance: overdueInstallments.reduce((sum, item) => sum + item.totalDue, 0),
         outstandingBalance: unpaidInstallments.reduce((sum, item) => sum + item.amount, 0),
         nextDue: unpaidInstallments[0] ?? null,
       };

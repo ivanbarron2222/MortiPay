@@ -11,11 +11,15 @@ import {
 } from "../../lib/demo-users";
 import { formatPhpCurrency } from "../../lib/financing";
 import { getCurrentTenantSummary, type TenantSummary } from "../../lib/platform";
+import { getOverdueSettings, type OverdueSettings } from "../../lib/tenant-config";
 
 export function AdminLoans() {
   const [searchTerm, setSearchTerm] = useState("");
   const [usersWithLoans, setUsersWithLoans] = useState<DemoUserAccount[]>([]);
   const [tenant, setTenant] = useState<TenantSummary | null>(null);
+  const [overdueSettings, setOverdueSettings] = useState<OverdueSettings>(
+    getOverdueSettings(),
+  );
 
   useEffect(() => {
     let active = true;
@@ -29,6 +33,7 @@ export function AdminLoans() {
           users.filter((user) => user.role === "tenant_user" && user.loanProfile),
         );
         setTenant(nextTenant);
+        setOverdueSettings(getOverdueSettings());
       }
     };
     load();
@@ -81,9 +86,32 @@ export function AdminLoans() {
       <div>
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Loan Accounts</h1>
         <p className="text-gray-600">
-          Admin can mark each installment month as paid for tracking.
+          Admin can mark installments as paid. Overdue rules automatically add fees to each
+          missed month.
         </p>
       </div>
+
+      <Card className="rounded-xl border-blue-100 bg-blue-50 p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="font-semibold text-blue-950">Overdue Rules Active</h2>
+            <p className="mt-1 text-sm text-blue-800">
+              Grace period: {overdueSettings.gracePeriodDays} day
+              {overdueSettings.gracePeriodDays === 1 ? "" : "s"} | Fee:{" "}
+              {overdueSettings.feeType === "percentage"
+                ? `${overdueSettings.feeAmount}%`
+                : formatPhpCurrency(overdueSettings.feeAmount)}
+              {overdueSettings.feeType === "daily" ? " per overdue day" : ""}
+            </p>
+          </div>
+          <button
+            onClick={() => window.location.assign("/admin/settings")}
+            className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-100"
+          >
+            Edit Settings
+          </button>
+        </div>
+      </Card>
 
       <Card className="p-6 rounded-xl">
         <div className="relative">
@@ -217,14 +245,23 @@ export function AdminLoans() {
                   {schedule.map((item) => (
                     <div
                       key={`${user.id}-${item.installmentNumber}`}
-                      className="flex items-center justify-between rounded-md border p-2"
+                      className={`flex items-center justify-between rounded-md border p-2 ${
+                        item.overdue ? "border-red-200 bg-red-50" : ""
+                      }`}
                     >
                       <div className="text-sm">
                         <p className="font-medium text-gray-900">
                           Month {item.installmentNumber} • {item.dueDate}
                         </p>
                         <p className="text-xs text-gray-600">
-                          {formatPhpCurrency(item.amount)}
+                          Installment: {formatPhpCurrency(item.amount)}
+                          {item.overdue ? (
+                            <>
+                              {" "}
+                              | Overdue fee: {formatPhpCurrency(item.overdueFee)} | Total due:{" "}
+                              {formatPhpCurrency(item.totalDue)}
+                            </>
+                          ) : null}
                         </p>
                       </div>
                       {item.paid ? (
@@ -241,18 +278,25 @@ export function AdminLoans() {
                           Paid
                         </button>
                       ) : (
-                        <button
-                          onClick={() =>
-                            handleInstallmentStatusChange(
-                              user.id,
-                              item.installmentNumber,
-                              true,
-                            )
-                          }
-                          className="px-3 py-1 rounded text-xs font-semibold bg-gray-100 text-gray-700 hover:bg-blue-100 hover:text-blue-700"
-                        >
-                          Mark Paid
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {item.overdue ? (
+                            <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
+                              {item.daysOverdue}d overdue
+                            </span>
+                          ) : null}
+                          <button
+                            onClick={() =>
+                              handleInstallmentStatusChange(
+                                user.id,
+                                item.installmentNumber,
+                                true,
+                              )
+                            }
+                            className="px-3 py-1 rounded text-xs font-semibold bg-gray-100 text-gray-700 hover:bg-blue-100 hover:text-blue-700"
+                          >
+                            Mark Paid
+                          </button>
+                        </div>
                       )}
                     </div>
                   ))}

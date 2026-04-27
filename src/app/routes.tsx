@@ -131,6 +131,13 @@ if (!userAppOnly) {
                   Component: (await import("./components/admin/AdminReports")).AdminReports,
                 }),
               },
+              {
+                path: "settings",
+                lazy: async () => ({
+                  Component: (await import("./components/admin/AdminSettings"))
+                    .AdminSettings,
+                }),
+              },
             ],
           },
         ],

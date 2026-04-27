@@ -10,6 +10,7 @@ import {
 import { getAdminReportAnalytics } from "../../lib/admin-reporting";
 import { formatPhpCurrency } from "../../lib/financing";
 import { type TenantSummary } from "../../lib/platform";
+import { getSupabaseAnonKey, getSupabaseFunctionUrl } from "../../lib/supabase";
 
 type AssistantMessage = {
   id: string;
@@ -21,6 +22,62 @@ type QuickAction = {
   label: string;
   prompt: string;
 };
+
+type EmailDraft = {
+  to: string;
+  subject: string;
+  body: string;
+};
+
+type AdminAiResponse = {
+  reply?: string;
+  draft?: EmailDraft;
+  error?: string;
+};
+
+async function callEdgeFunction<TResponse>(
+  functionName: string,
+  body: Record<string, unknown>,
+): Promise<TResponse> {
+  const url = getSupabaseFunctionUrl(functionName);
+  const anonKey = getSupabaseAnonKey();
+  if (!url || !anonKey) {
+    throw new Error("Supabase URL or anon key is not configured in the frontend.");
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      apikey: anonKey,
+      authorization: `Bearer ${anonKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await response.text();
+  let payload: unknown = null;
+  if (text.trim()) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { error: text };
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      payload &&
+      typeof payload === "object" &&
+      "error" in payload &&
+      typeof payload.error === "string"
+        ? payload.error
+        : `Edge Function ${functionName} failed with status ${response.status}.`;
+    throw new Error(message);
+  }
+
+  return payload as TResponse;
+}
 
 const quickActions: QuickAction[] = [
   {
@@ -122,10 +179,53 @@ function buildAssistantResponse(prompt: string, users: DemoUserAccount[], tenant
   ].join("\n");
 }
 
+function buildBorrowerContext(users: DemoUserAccount[]) {
+  const tenantUsers = users.filter((user) => user.role === "tenant_user");
+  const analytics = getAdminReportAnalytics(tenantUsers);
+  return analytics.watchlist.map((entry) => ({
+    id: entry.user.id,
+    fullName: entry.user.fullName,
+    email: entry.user.email,
+    phone: entry.user.phone,
+    motorcycle: entry.user.loanProfile?.motorcycle,
+    overdueInstallmentCount: entry.overdueInstallmentCount,
+    overdueBalance: entry.overdueBalance,
+    outstandingBalance: entry.outstandingBalance,
+    nextDueDate: entry.nextDue?.dueDate.toISOString() ?? null,
+  }));
+}
+
+function isEmailDraftPrompt(prompt: string) {
+  const normalized = prompt.toLowerCase();
+  return (
+    normalized.includes("draft") ||
+    normalized.includes("email") ||
+    normalized.includes("reminder") ||
+    normalized.includes("message")
+  );
+}
+
+function buildLocalEmailDraft(users: DemoUserAccount[]): EmailDraft | null {
+  const tenantUsers = users.filter((user) => user.role === "tenant_user");
+  const analytics = getAdminReportAnalytics(tenantUsers);
+  const topWatchlist = analytics.watchlist[0];
+  if (!topWatchlist) return null;
+
+  return {
+    to: topWatchlist.user.email,
+    subject: "Motorcycle installment payment reminder",
+    body: `Hello ${topWatchlist.user.fullName},\n\nThis is a reminder about your motorcycle installment. Our records show ${formatPhpCurrency(topWatchlist.overdueBalance)} overdue and ${formatPhpCurrency(topWatchlist.outstandingBalance)} total outstanding.\n\nPlease settle your overdue payment or contact us if you need assistance.\n\nThank you.`,
+  };
+}
+
 export function AdminAIAssistant({ tenant }: { tenant: TenantSummary }) {
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState<DemoUserAccount[]>([]);
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sendLoading, setSendLoading] = useState(false);
+  const [draft, setDraft] = useState<EmailDraft | null>(null);
+  const [error, setError] = useState("");
   const [messages, setMessages] = useState<AssistantMessage[]>([
     {
       id: "welcome",
@@ -153,20 +253,106 @@ export function AdminAIAssistant({ tenant }: { tenant: TenantSummary }) {
   );
   const analytics = useMemo(() => getAdminReportAnalytics(tenantUsers), [tenantUsers]);
 
-  const submitPrompt = (prompt: string) => {
+  const submitPrompt = async (prompt: string) => {
     const trimmed = prompt.trim();
     if (!trimmed) return;
 
+    const history = messages
+      .filter((message) => message.id !== "welcome")
+      .map((message) => ({ role: message.role, content: message.content }));
+    const userMessage: AssistantMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: trimmed,
+    };
+
     setMessages((current) => [
       ...current,
-      { id: crypto.randomUUID(), role: "user", content: trimmed },
-      {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: buildAssistantResponse(trimmed, users, tenant),
-      },
+      userMessage,
     ]);
     setInput("");
+    setError("");
+    setLoading(true);
+
+    try {
+      const mode = isEmailDraftPrompt(trimmed) ? "email_draft" : "chat";
+      const data = await callEdgeFunction<AdminAiResponse>(
+        "admin-ai",
+        {
+          prompt: trimmed,
+          mode,
+          tenant: {
+            name: tenant.name,
+            plan: tenant.plan,
+          },
+          analytics,
+          borrowers: buildBorrowerContext(users),
+          messages: history,
+        },
+      );
+      if (data?.error) throw new Error(data.error);
+
+      const nextDraft = data?.draft ?? null;
+      if (nextDraft) setDraft(nextDraft);
+
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content:
+            data?.reply ??
+            (nextDraft
+              ? "I drafted an email below. Review and edit it before sending."
+              : buildAssistantResponse(trimmed, users, tenant)),
+        },
+      ]);
+    } catch (err) {
+      const fallbackDraft = isEmailDraftPrompt(trimmed) ? buildLocalEmailDraft(users) : null;
+      if (fallbackDraft) setDraft(fallbackDraft);
+      setError(
+        err instanceof Error
+          ? `AI service unavailable. Showing local fallback. ${err.message}`
+          : "AI service unavailable. Showing local fallback.",
+      );
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: buildAssistantResponse(trimmed, users, tenant),
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sendDraft = async () => {
+    if (!draft) return;
+    setSendLoading(true);
+    setError("");
+    try {
+      const data = await callEdgeFunction<{
+        ok?: boolean;
+        error?: string;
+      }>("send-borrower-email", draft);
+      if (data?.error) throw new Error(data.error);
+
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `Email sent to ${draft.to}.`,
+        },
+      ]);
+      setDraft(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to send email.");
+    } finally {
+      setSendLoading(false);
+    }
   };
 
   return (
@@ -208,7 +394,7 @@ export function AdminAIAssistant({ tenant }: { tenant: TenantSummary }) {
                 <button
                   key={action.label}
                   type="button"
-                  onClick={() => submitPrompt(action.prompt)}
+                  onClick={() => void submitPrompt(action.prompt)}
                   className="rounded-xl border border-gray-200 px-3 py-2 text-left text-xs font-medium text-gray-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                 >
                   {action.label}
@@ -238,12 +424,84 @@ export function AdminAIAssistant({ tenant }: { tenant: TenantSummary }) {
                 </div>
               </div>
             ))}
+            {loading ? (
+              <div className="flex justify-start">
+                <div className="rounded-2xl bg-gray-100 px-4 py-3 text-sm text-gray-600">
+                  Thinking...
+                </div>
+              </div>
+            ) : null}
+            {draft ? (
+              <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-sm font-semibold text-blue-950">Editable Email Draft</p>
+                  <button
+                    type="button"
+                    onClick={() => setDraft(null)}
+                    className="text-xs font-medium text-blue-700 hover:text-blue-900"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <label className="block text-xs font-medium text-blue-900">
+                    To
+                    <input
+                      value={draft.to}
+                      onChange={(event) =>
+                        setDraft((current) =>
+                          current ? { ...current, to: event.target.value } : current,
+                        )
+                      }
+                      className="mt-1 w-full rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-300"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-blue-900">
+                    Subject
+                    <input
+                      value={draft.subject}
+                      onChange={(event) =>
+                        setDraft((current) =>
+                          current ? { ...current, subject: event.target.value } : current,
+                        )
+                      }
+                      className="mt-1 w-full rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-300"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-blue-900">
+                    Message
+                    <Textarea
+                      value={draft.body}
+                      onChange={(event) =>
+                        setDraft((current) =>
+                          current ? { ...current, body: event.target.value } : current,
+                        )
+                      }
+                      className="mt-1 min-h-32 resize-none rounded-lg border-blue-100 bg-white text-sm"
+                    />
+                  </label>
+                  <Button
+                    type="button"
+                    onClick={() => void sendDraft()}
+                    disabled={sendLoading}
+                    className="w-full rounded-xl bg-green-600 hover:bg-green-700"
+                  >
+                    {sendLoading ? "Sending..." : "Send Email"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            {error ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {error}
+              </div>
+            ) : null}
           </div>
 
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              submitPrompt(input);
+              void submitPrompt(input);
             }}
             className="border-t border-gray-100 p-4"
           >
@@ -257,6 +515,7 @@ export function AdminAIAssistant({ tenant }: { tenant: TenantSummary }) {
               />
               <Button
                 type="submit"
+                disabled={loading}
                 className="h-11 w-11 shrink-0 rounded-xl bg-blue-600 p-0 hover:bg-blue-700"
                 aria-label="Send message"
               >
@@ -265,7 +524,7 @@ export function AdminAIAssistant({ tenant }: { tenant: TenantSummary }) {
             </div>
             <div className="mt-2 flex items-center gap-2 text-[11px] text-gray-500">
               <MessageCircle size={12} />
-              Uses current tenant data. External AI API can be connected later.
+              Uses OpenRouter for AI and Brevo for approved email sending.
             </div>
           </form>
         </div>

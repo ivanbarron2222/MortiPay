@@ -5,6 +5,7 @@ import {
   setActiveTenantSlug,
   supabase,
 } from "./supabase";
+import { calculateOverdueFee, getOverdueSettings } from "./tenant-config";
 
 export type DemoUserRole = "super_admin" | "tenant_admin" | "tenant_user";
 export type DemoLocationPermissionState = PermissionState | "unknown";
@@ -30,8 +31,13 @@ export type DemoLoanProfile = {
 export type LoanInstallmentItem = {
   installmentNumber: number;
   dueDate: string;
+  dueDateIso: string;
   paid: boolean;
   amount: number;
+  overdue: boolean;
+  overdueFee: number;
+  daysOverdue: number;
+  totalDue: number;
 };
 
 export type DemoUserAccount = {
@@ -1943,10 +1949,18 @@ export function getLoanInstallmentSchedule(
 ): LoanInstallmentItem[] {
   const start = new Date(loanProfile.startDate);
   const paidInstallmentNumbers = loanProfile.paidInstallmentNumbers ?? [];
+  const overdueSettings = getOverdueSettings();
   return Array.from({ length: loanProfile.termMonths }).map((_, index) => {
     const installmentNumber = index + 1;
     const dueDate = new Date(start);
     dueDate.setMonth(start.getMonth() + index);
+    const paid = paidInstallmentNumbers.includes(installmentNumber);
+    const overdue = calculateOverdueFee({
+      dueDate,
+      amount: loanProfile.monthlyInstallment,
+      paid,
+      settings: overdueSettings,
+    });
     return {
       installmentNumber,
       dueDate: dueDate.toLocaleDateString("en-US", {
@@ -1954,8 +1968,13 @@ export function getLoanInstallmentSchedule(
         day: "2-digit",
         year: "numeric",
       }),
-      paid: paidInstallmentNumbers.includes(installmentNumber),
+      dueDateIso: dueDate.toISOString(),
+      paid,
       amount: loanProfile.monthlyInstallment,
+      overdue: overdue.overdue,
+      overdueFee: overdue.overdueFee,
+      daysOverdue: overdue.daysOverdue,
+      totalDue: overdue.totalDue,
     };
   });
 }

@@ -4,30 +4,32 @@ import { useNavigate } from "react-router";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { ImageWithFallback } from "../figma/ImageWithFallback";
-import { motorcycleCatalog } from "../../data/motorcycles";
 import { estimateLoan, formatPhpCurrency, getDefaultLoanSetup } from "../../lib/financing";
 import { getFavoriteCatalogIds, toggleFavoriteCatalogId } from "../../lib/catalog-storage";
+import { getTenantCatalog, type TenantCatalogItem } from "../../lib/tenant-config";
 
 export function Catalog() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [catalog, setCatalog] = useState<TenantCatalogItem[]>([]);
 
   useEffect(() => {
     setFavorites(getFavoriteCatalogIds());
+    setCatalog(getTenantCatalog().filter((item) => item.visible));
   }, []);
 
   const filteredItems = useMemo(() => {
-    return motorcycleCatalog.filter((item) => {
+    return catalog.filter((item) => {
       const matchesSearch = `${item.brand} ${item.model} ${item.engineCc}`
         .toLowerCase()
         .includes(search.toLowerCase());
       return matchesSearch;
     });
-  }, [search]);
+  }, [catalog, search]);
 
   const getEstimate = (price: number, itemId: string) => {
-    const item = motorcycleCatalog.find((catalogItem) => catalogItem.id === itemId);
+    const item = catalog.find((catalogItem) => catalogItem.id === itemId);
     if (!item) return null;
     const defaultLoan = getDefaultLoanSetup(item);
     return estimateLoan({
